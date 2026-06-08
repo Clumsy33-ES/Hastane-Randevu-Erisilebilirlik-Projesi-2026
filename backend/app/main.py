@@ -36,8 +36,16 @@ def on_startup():
 import os
 
 # Get CORS_ORIGINS from env, split by comma, remove whitespace
-cors_env = os.getenv("CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173")
-origins = [origin.strip() for origin in cors_env.split(",") if origin.strip()]
+cors_env = os.getenv("CORS_ORIGINS", "")
+origins = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+]
+if cors_env:
+    for origin in cors_env.split(","):
+        o = origin.strip()
+        if o and o not in origins:
+            origins.append(o)
 
 app.add_middleware(
     CORSMiddleware,
@@ -84,6 +92,10 @@ class FamilyPhysicianAppointmentRequest(BaseModel):
 @app.get("/")
 def root():
     return {"message": "API çalışıyor"}
+
+@app.get("/health")
+def health():
+    return {"status": "healthy"}
 
 @app.post("/auth/login")
 def login(request: LoginRequest, db: Session = Depends(get_db)):
