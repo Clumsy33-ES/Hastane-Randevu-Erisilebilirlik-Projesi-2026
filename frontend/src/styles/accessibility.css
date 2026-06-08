@@ -1,0 +1,291 @@
+/* ==========================================================
+   accessibility.css — Header, A11y Modes, Focus Ring
+   ========================================================== */
+
+/* ===== APP HEADER ===== */
+.app-header {
+  height: var(--header-h);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  box-shadow: 0 1px 6px rgba(0,0,0,0.06);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 32px;
+  gap: 16px;
+  position: sticky;
+  top: 0;
+  z-index: 200;
+}
+
+/* ── Centered container inside header ── */
+.header-inner {
+  width: 100%;
+  max-width: 1100px;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+/* Logo */
+.header-logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--primary);
+  border-radius: 10px;
+  padding: 8px 16px;
+  font-size: 0.95rem;
+  font-weight: 800;
+  color: #fff;
+  white-space: nowrap;
+  letter-spacing: 0.01em;
+  text-decoration: none;
+}
+
+/* Accessibility nav */
+.header-nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: nowrap;
+}
+
+/* Each acc button */
+.header-acc-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 36px;
+  padding: 0 14px;
+  border: 1.5px solid var(--border);
+  border-radius: 8px;
+  background: #f3f3f3;
+  color: var(--text);
+  font-size: 0.82rem;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+.header-acc-btn:hover:not(.active) {
+  background: #e4e4e4;
+  border-color: #bbb;
+}
+.header-acc-btn.active {
+  background: #1a1a1a;
+  color: #ffffff;
+  border-color: #1a1a1a;
+}
+
+/* Profile */
+.header-profile  { position: relative; flex-shrink: 0; }
+
+.header-profile-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 6px 10px;
+  border-radius: 10px;
+  transition: background 0.12s;
+  font-family: inherit;
+}
+.header-profile-btn:hover { background: #f0f0f0; }
+
+.header-profile-name {
+  font-weight: 700;
+  font-size: 0.88rem;
+  color: var(--text);
+}
+
+.header-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--primary);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 0.9rem;
+  flex-shrink: 0;
+}
+
+/* Profile dropdown */
+.profile-dropdown {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-md);
+  min-width: 200px;
+  z-index: 300;
+  overflow: hidden;
+}
+.profile-dropdown ul { list-style: none; margin: 0; padding: 6px 0; }
+.profile-dropdown li button {
+  width: 100%;
+  padding: 12px 22px;
+  text-align: left;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--text);
+  font-family: inherit;
+  transition: background 0.1s;
+}
+.profile-dropdown li button:hover { background: #f5f5f5; }
+.profile-dropdown li button.danger { color: var(--primary); font-weight: 700; }
+
+.profile-dropdown-divider { height: 1px; background: var(--border); margin: 4px 0; }
+
+/* ===== LARGE TEXT MODE ===== */
+body.large-text { font-size: 1.15rem; }
+body.large-text h1 { font-size: 2.1rem !important; }
+body.large-text h2 { font-size: 1.7rem !important; }
+body.large-text h3 { font-size: 1.4rem !important; }
+body.large-text h4 { font-size: 1.2rem !important; }
+
+body.large-text .btn-large  { font-size: 1.1rem !important; height: 54px !important; }
+body.large-text input,
+body.large-text select       { font-size: 1.1rem !important; padding: 14px !important; }
+body.large-text label        { font-size: 0.95rem !important; }
+body.large-text .tab-btn     { font-size: 1.05rem !important; padding: 18px 20px !important; }
+body.large-text .slot-btn, body.large-text .btn-slot { font-size: 1.05rem !important; padding: 14px 24px !important; }
+body.large-text .header-acc-btn { font-size: 0.9rem !important; height: 42px !important; padding: 0 16px !important; }
+body.large-text .apt-card-doctor { font-size: 1.1rem !important; }
+body.large-text .apt-card-time-value { font-size: 1.4rem !important; }
+body.large-text .apt-card-actions .btn-sm { height: 40px !important; font-size: 0.9rem !important; }
+
+/* ===== HIGH CONTRAST MODE ===== */
+body.high-contrast {
+  --bg:             #000000 !important;
+  --text:           #ffffff !important;
+  --text-muted:     #cccccc !important;
+  --text-light:     #999999 !important;
+  --surface:        #0a0a0a !important;
+  --surface-alt:    #111111 !important;
+  --primary:        #ffff00 !important;
+  --primary-hover:  #e6e600 !important;
+  --primary-light:  #1a1a00 !important;
+  --secondary:      #ffffff !important;
+  --secondary-hover:#e0e0e0 !important;
+  --confirm:        #00d4ff !important;
+  --input-bg:       #111111 !important;
+  --input-border:   #ffff00 !important;
+  --border:         #444444 !important;
+  --shadow-sm:      none !important;
+  --shadow:         none !important;
+  --shadow-md:      none !important;
+  background-color: #000 !important;
+  color: #fff !important;
+}
+
+body.high-contrast .card,
+body.high-contrast .card-flat,
+body.high-contrast .doctor-card,
+body.high-contrast .loading-card,
+body.high-contrast .empty-state,
+body.high-contrast .profile-dropdown { border: 2px solid #ffff00 !important; box-shadow: none !important; }
+
+body.high-contrast .action-card { border: 2px solid #ffff00 !important; border-left: 5px solid #ffff00 !important; box-shadow: none !important; }
+body.high-contrast .action-card:hover { background: #1a1a00 !important; }
+
+body.high-contrast .apt-row { border-bottom: 1px solid #444 !important; }
+body.high-contrast .apt-row:hover { background: #111 !important; }
+
+body.high-contrast .apt-card {
+  background: #000 !important;
+  border: 2px solid #ffff00 !important;
+}
+body.high-contrast .apt-card:hover { background: #111 !important; }
+body.high-contrast .apt-card:focus-visible { box-shadow: 0 0 0 3px #ffff00 !important; border-color: #ffff00 !important; }
+body.high-contrast .apt-card-header { background: #111 !important; border-bottom-color: #444 !important; }
+body.high-contrast .apt-card-datetime { background: #111 !important; border-color: #444 !important; }
+body.high-contrast .apt-card-actions { border-top-color: #444 !important; }
+body.high-contrast .apt-card-date-sep { background: #444 !important; }
+body.high-contrast .apt-card-time-value { color: #ffff00 !important; }
+body.high-contrast .apt-section-header { border-bottom-color: #444 !important; }
+body.high-contrast .apt-section-count { background: #111 !important; border-color: #444 !important; color: #ccc !important; }
+body.high-contrast .apt-section-empty { border-color: #444 !important; background: #0a0a0a !important; }
+body.high-contrast .badge-fp       { background: #003344 !important; color: #00d4ff !important; }
+body.high-contrast .badge-hospital  { background: #001133 !important; color: #6699ff !important; }
+
+body.high-contrast input, body.high-contrast select {
+  background: #111 !important; color: #ffff00 !important; border: 2px solid #ffff00 !important;
+}
+
+body.high-contrast .btn-primary,
+body.high-contrast .btn-secondary,
+body.high-contrast .btn-success,
+body.high-contrast .btn-confirm,
+body.high-contrast .btn-danger {
+  background: #000 !important; color: #ffff00 !important; border: 2px solid #ffff00 !important;
+}
+body.high-contrast .btn-primary:hover:not(:disabled),
+body.high-contrast .btn-secondary:hover:not(:disabled),
+body.high-contrast .btn-danger:hover:not(:disabled) {
+  background: #ffff00 !important; color: #000 !important;
+}
+
+body.high-contrast .app-header {
+  background: #000 !important;
+  border-bottom: 2px solid #ffff00 !important;
+  box-shadow: none !important;
+}
+
+body.high-contrast .header-logo   { background: #000 !important; color: #ffff00 !important; border: 2px solid #ffff00 !important; }
+body.high-contrast .header-acc-btn { background: #000 !important; color: #ffff00 !important; border: 1px solid #ffff00 !important; }
+body.high-contrast .header-acc-btn.active { background: #ffff00 !important; color: #000 !important; }
+body.high-contrast .header-avatar { background: #000 !important; color: #ffff00 !important; border: 2px solid #ffff00 !important; }
+
+body.high-contrast .modal-overlay { background: rgba(255,255,255,0.07) !important; }
+
+body.high-contrast .section-header,
+body.high-contrast .guide-bar,
+body.high-contrast .acc-mini-bar  { background: #111 !important; border-color: #444 !important; }
+
+body.high-contrast .tab-btn.active { color: #ffff00 !important; border-bottom-color: #ffff00 !important; }
+
+body.high-contrast .detail-table td:first-child { background: #111 !important; color: #ccc !important; }
+body.high-contrast .detail-table td:last-child  { background: #0a0a0a !important; }
+
+body.high-contrast .badge-active   { background: #003300 !important; color: #00ff00 !important; }
+body.high-contrast .badge-canceled { background: #330000 !important; color: #ff4444 !important; }
+body.high-contrast .badge-past     { background: #1a1a1a !important; color: #cccccc !important; }
+
+body.high-contrast .toggle-track { background: #333 !important; }
+body.high-contrast input:checked + .toggle-track { background: #ffff00 !important; }
+body.high-contrast .toggle-track::before { background: #000 !important; }
+
+/* ===== FOCUS RING ===== */
+*:focus-visible {
+  outline: 3px solid var(--primary) !important;
+  outline-offset: 3px !important;
+  border-radius: 6px;
+}
+
+body.high-contrast *:focus-visible {
+  outline: 3px solid #ffffff !important;
+  outline-offset: 3px !important;
+}
+
+/* ===== MOBILE ===== */
+@media (max-width: 700px) {
+  .app-header { padding: 0 16px; height: auto; min-height: var(--header-h); flex-wrap: wrap; padding-top: 10px; padding-bottom: 10px; }
+  .header-inner { flex-wrap: wrap; }
+  .header-nav { gap: 6px; flex-wrap: wrap; }
+  .header-acc-btn { height: 32px; font-size: 0.75rem; padding: 0 10px; }
+  .header-profile-name { display: none; }
+}
