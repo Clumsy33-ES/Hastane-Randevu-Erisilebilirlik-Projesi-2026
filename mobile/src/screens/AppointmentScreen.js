@@ -129,10 +129,25 @@ export default function AppointmentScreen({ setScreen, accessibilitySettings }) 
       let url = `/hospitals?city_id=${cityId}&district_id=${districtId}&branch_id=${branchId}`;
       const response = await apiClient.get(url);
       console.log("Selected filters:", selectedCity, selectedDistrict, selectedBranch);
+      console.log("Hospital request params:", {
+        city_id: cityId,
+        district_id: districtId,
+        branch_id: branchId
+      });
       console.log("Hospitals response:", response.data);
-      setHospitals(response.data || []);
+      
+      let hospitalList = [];
+      if (Array.isArray(response.data)) {
+        hospitalList = response.data;
+      } else if (response.data && Array.isArray(response.data.hospitals)) {
+        hospitalList = response.data.hospitals;
+      } else if (response.data && Array.isArray(response.data.value)) {
+        hospitalList = response.data.value;
+      }
+      return hospitalList;
     } catch (e) {
       handleApiError(e, 'Hastaneler yüklenirken hata oluştu.');
+      return [];
     } finally {
       setLoading(false);
     }
@@ -200,7 +215,7 @@ export default function AppointmentScreen({ setScreen, accessibilitySettings }) 
     setStep(3);
   };
 
-  const handleBranchSelect = (branch) => {
+  const handleBranchSelect = async (branch) => {
     setSelectedBranch(branch);
     // Cascade reset downstream selections
     setSelectedHospital(null);
@@ -210,7 +225,8 @@ export default function AppointmentScreen({ setScreen, accessibilitySettings }) 
     setDoctors([]);
     setSlots([]);
 
-    fetchHospitals(selectedCity.id, selectedDistrict.id, branch.id);
+    const data = await fetchHospitals(selectedCity.id, selectedDistrict.id, branch.id);
+    setHospitals(data);
     setStep(4);
   };
 
@@ -404,7 +420,7 @@ export default function AppointmentScreen({ setScreen, accessibilitySettings }) 
               ListEmptyComponent={
                 <View style={styles.emptyContainer}>
                   <Text style={[styles.emptyText, { color: colors.muted, fontSize: fontSizes.medium, textAlign: 'center' }]}>
-                    Seçtiğiniz il, ilçe ve branş kriterlerine uygun hastane bulunamadı. Lütfen filtrelerinizi değiştirin.
+                    Seçilen kriterlere uygun hastane bulunamadı.
                   </Text>
                 </View>
               }
