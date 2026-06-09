@@ -62,7 +62,7 @@ export default function App() {
     }
 
     // Let VoiceCommandAssistantScreen handle its own step-by-step logic
-    if (screen === 'voiceCommandAssistant') {
+    if (screen === 'voiceCommandAssistant' || screen === 'appointment') {
       return;
     }
 

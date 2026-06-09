@@ -59,24 +59,16 @@ export default function ProfileScreen({
   };
 
   const handleLogout = async () => {
-    Alert.alert('Çıkış', 'Çıkış yapmak istediğinize emin misiniz?', [
-      { text: 'İptal', style: 'cancel' },
-      {
-        text: 'Evet',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            voiceService.cleanup();
-            await AsyncStorage.removeItem('token');
-            await AsyncStorage.removeItem('role');
-            await AsyncStorage.removeItem('user');
-            setScreen('login');
-          } catch (e) {
-            console.error('[Logout Error]', e);
-          }
-        },
-      },
-    ]);
+    console.log('[ProfileScreen] handleLogout initiated');
+    try {
+      voiceService.cleanup();
+      await AsyncStorage.removeItem('token');
+      await AsyncStorage.removeItem('role');
+      await AsyncStorage.removeItem('user');
+      setScreen('login');
+    } catch (e) {
+      console.error('[Logout Error]', e);
+    }
   };
 
   if (!user) return null;
@@ -185,7 +177,7 @@ export default function ProfileScreen({
             accessibilityLabel="Çıkış yap"
             accessibilityHint="Sistemden çıkış yapmak için çift tıklayın"
           >
-            <Text style={[styles.logoutBtnText, { fontSize: fontSizes.large }]}>Çıkış Yap</Text>
+            <Text pointerEvents="none" style={[styles.logoutBtnText, { fontSize: fontSizes.large }]}>Çıkış Yap</Text>
           </TouchableOpacity>
         </View>
 

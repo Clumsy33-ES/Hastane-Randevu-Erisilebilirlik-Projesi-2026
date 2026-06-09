@@ -34,6 +34,19 @@ class VoiceService {
 
   async speak(text, onDone = null, force = false) {
     try {
+      // 1. speak başlamadan önce her zaman stop çağır
+      if (Platform.OS === 'web') {
+        if (typeof window !== 'undefined' && window.speechSynthesis) {
+          window.speechSynthesis.cancel();
+        }
+      } else {
+        try {
+          await Speech.stop();
+        } catch (e) {
+          console.log('[Speech] Error stopping native speech', e);
+        }
+      }
+
       if (!text || text.trim() === '') return;
 
       // Prevent duplicate reading on re-renders, unless forced (e.g., manual "listen again")
@@ -53,9 +66,6 @@ class VoiceService {
         this.stopListeningInternal();
       }
 
-      // Always clear previous speech before starting a new one
-      await Speech.stop();
-
       const handleSpeechFinished = () => {
         this.isSpeaking = false;
         if (onDone) onDone();
@@ -70,18 +80,38 @@ class VoiceService {
         }
       };
 
+      // ─── Web Speech Synthesis Fallback ──────────────────────────────────
+      if (Platform.OS === 'web') {
+        if (window.speechSynthesis) {
+          window.speechSynthesis.cancel();
+          const utterance = new SpeechSynthesisUtterance(text);
+          utterance.lang = 'tr-TR';
+          utterance.rate = 1.15;
+          utterance.pitch = 1.0;
+          utterance.onend = handleSpeechFinished;
+          utterance.onerror = (e) => {
+            console.log('[Speech] TTS Web Error', e);
+            handleSpeechFinished();
+          };
+          window.speechSynthesis.speak(utterance);
+        } else {
+          handleSpeechFinished();
+        }
+        return;
+      }
+
+      // ─── Native / Expo Go TTS ───────────────────────────────────────────
       Speech.speak(text, {
         language: 'tr-TR',
-        rate: 1.2,
+        rate: 1.15,
         pitch: 1.0,
         onDone: handleSpeechFinished,
         onStopped: () => {
           this.isSpeaking = false;
-          // Don't auto-resume if explicitly stopped
         },
         onError: (err) => {
-          console.log('[voiceService Error]', err);
-          handleSpeechFinished(); // Safe fallback: proceed with resuming listener
+          console.log('[Speech] TTS Error', err);
+          handleSpeechFinished();
         },
       });
     } catch (error) {
@@ -92,7 +122,11 @@ class VoiceService {
 
   stopSpeaking() {
     try {
-      Speech.stop();
+      // 4. Screen blur/unmount / logout olunca:
+      if (typeof window !== 'undefined' && window.speechSynthesis?.cancel) {
+        window.speechSynthesis.cancel();
+      }
+      Speech.stop().catch(() => {});
       this.isSpeaking = false;
     } catch (error) {
       console.log('[voiceService Stop Error]', error.message);

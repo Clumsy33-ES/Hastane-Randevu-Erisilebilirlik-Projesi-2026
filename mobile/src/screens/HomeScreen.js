@@ -7,6 +7,7 @@ import {
   Alert,
   SafeAreaView,
   ScrollView,
+  Platform,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { MaterialIcons } from '@expo/vector-icons';
@@ -67,23 +68,16 @@ export default function HomeScreen({ setScreen, accessibilitySettings }) {
   };
 
   const handleLogout = async () => {
-    Alert.alert('Çıkış', 'Çıkış yapmak istediğinize emin misiniz?', [
-      { text: 'İptal', style: 'cancel' },
-      {
-        text: 'Evet',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            await AsyncStorage.removeItem('token');
-            await AsyncStorage.removeItem('role');
-            await AsyncStorage.removeItem('user');
-            setScreen('login');
-          } catch (e) {
-            console.error('[Logout Error]', e);
-          }
-        },
-      },
-    ]);
+    console.log('[HomeScreen] handleLogout initiated');
+    try {
+      voiceService.cleanup();
+      await AsyncStorage.removeItem('token');
+      await AsyncStorage.removeItem('role');
+      await AsyncStorage.removeItem('user');
+      setScreen('login');
+    } catch (e) {
+      console.error('[Logout Error]', e);
+    }
   };
 
   const menuItems = [
@@ -204,18 +198,20 @@ export default function HomeScreen({ setScreen, accessibilitySettings }) {
             accessibilityHint="Oturumunuzu kapatır ve giriş ekranına döner"
             activeOpacity={0.75}
           >
-            <View style={[styles.iconContainer, styles.logoutIconContainer, { backgroundColor: colors.primary }]}>
-              <MaterialIcons name="logout" size={26} color="#ffffff" />
+            <View pointerEvents="none" style={{ flexDirection: 'row', alignItems: 'center', width: '100%', flex: 1 }}>
+              <View style={[styles.iconContainer, styles.logoutIconContainer, { backgroundColor: colors.primary }]}>
+                <MaterialIcons name="logout" size={26} color="#ffffff" />
+              </View>
+              <View style={styles.cardContent}>
+                <Text style={[styles.cardTitle, styles.logoutText, { color: colors.primary, fontSize: fontSizes.large }]}>
+                  Çıkış Yap
+                </Text>
+                <Text style={[styles.cardSubtitle, { color: colors.muted, fontSize: fontSizes.medium }]}>
+                  Oturumunuzu güvenli şekilde sonlandırın.
+                </Text>
+              </View>
+              <MaterialIcons name="chevron-right" size={26} color={colors.muted} />
             </View>
-            <View style={styles.cardContent}>
-              <Text style={[styles.cardTitle, styles.logoutText, { color: colors.primary, fontSize: fontSizes.large }]}>
-                Çıkış Yap
-              </Text>
-              <Text style={[styles.cardSubtitle, { color: colors.muted, fontSize: fontSizes.medium }]}>
-                Oturumunuzu güvenli şekilde sonlandırın.
-              </Text>
-            </View>
-            <MaterialIcons name="chevron-right" size={26} color={colors.muted} />
           </TouchableOpacity>
         </View>
 
