@@ -38,12 +38,15 @@ import os
 # Get CORS_ORIGINS from env, split by comma, remove whitespace
 cors_env = os.getenv("CORS_ORIGINS", "")
 origins = [
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
     "http://localhost:8081",
-    "http://127.0.0.1:8081",
     "http://localhost:19006",
+    "http://localhost:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:8081",
     "http://127.0.0.1:19006",
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:3000",
+    "https://hospital-backend-gtgc.onrender.com",
     "https://hastane-randevu-erisilebilirlik-pro.vercel.app",
     "https://hastane-randevu-erisilebilirlik-projesi-2026-1wvk72arp.vercel.app",
 ]
@@ -56,7 +59,6 @@ if cors_env:
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
-    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
