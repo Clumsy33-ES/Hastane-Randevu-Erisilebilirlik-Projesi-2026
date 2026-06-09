@@ -11,7 +11,9 @@ apiClient.interceptors.request.use(
   async (config) => {
     try {
       const token = await AsyncStorage.getItem('token');
+      console.log(`[API CLIENT] Sending ${config.method?.toUpperCase()} request to ${config.url}. Token present: ${!!token}`);
       if (token) {
+        config.headers = config.headers || {};
         config.headers.Authorization = `Bearer ${token}`;
       }
     } catch (e) {
@@ -34,6 +36,11 @@ apiClient.interceptors.response.use(
         `[API CLIENT] Response Error Status: ${error.response.status}`,
         JSON.stringify(error.response.data)
       );
+      if (error.response.status === 401) {
+        AsyncStorage.multiRemove(['token', 'role', 'user']).catch((storageErr) => {
+          console.error('[API CLIENT] Error clearing storage on 401:', storageErr);
+        });
+      }
     } else if (error.request) {
       console.error('[API CLIENT] Network Error - No Response Received:', error.request);
     } else {

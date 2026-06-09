@@ -41,6 +41,18 @@ export default function AppointmentScreen({ setScreen, accessibilitySettings }) 
   const [doctors, setDoctors] = useState([]);
   const [slots, setSlots] = useState([]);
 
+  const handleApiError = (e, defaultMsg) => {
+    console.error('[API Error]', e);
+    if (e.response?.status === 401) {
+      Alert.alert('Oturum Hatası', 'Oturum süreniz doldu, tekrar giriş yapın.', [
+        { text: 'Tamam', onPress: () => setScreen('login') },
+      ]);
+    } else {
+      const errorMsg = e.response?.data?.detail || defaultMsg;
+      Alert.alert('Hata', errorMsg);
+    }
+  };
+
   // Voice guide trigger on mount
   useEffect(() => {
     if (accessibilitySettings?.voiceGuide) {
@@ -72,10 +84,16 @@ export default function AppointmentScreen({ setScreen, accessibilitySettings }) 
       setCities(response.data || []);
     } catch (e) {
       console.error('[Fetch Cities Error]', e);
-      Alert.alert(
-        'Bağlantı Hatası',
-        'Veriler yüklenemedi. Lütfen internet bağlantınızı kontrol edin.'
-      );
+      if (e.response?.status === 401) {
+        Alert.alert('Oturum Hatası', 'Oturum süreniz doldu, tekrar giriş yapın.', [
+          { text: 'Tamam', onPress: () => setScreen('login') },
+        ]);
+      } else {
+        Alert.alert(
+          'Bağlantı Hatası',
+          'Veriler yüklenemedi. Lütfen internet bağlantınızı kontrol edin.'
+        );
+      }
     } finally {
       setLoading(false);
     }
@@ -87,8 +105,7 @@ export default function AppointmentScreen({ setScreen, accessibilitySettings }) 
       const response = await apiClient.get(`/locations/districts?city_id=${cityId}`);
       setDistricts(response.data || []);
     } catch (e) {
-      console.error('[Fetch Districts Error]', e);
-      Alert.alert('Hata', 'İlçeler yüklenirken hata oluştu.');
+      handleApiError(e, 'İlçeler yüklenirken hata oluştu.');
     } finally {
       setLoading(false);
     }
@@ -100,8 +117,7 @@ export default function AppointmentScreen({ setScreen, accessibilitySettings }) 
       const response = await apiClient.get('/branches');
       setBranches(response.data || []);
     } catch (e) {
-      console.error('[Fetch Branches Error]', e);
-      Alert.alert('Hata', 'Branşlar yüklenirken hata oluştu.');
+      handleApiError(e, 'Branşlar yüklenirken hata oluştu.');
     } finally {
       setLoading(false);
     }
@@ -116,8 +132,7 @@ export default function AppointmentScreen({ setScreen, accessibilitySettings }) 
       console.log("Hospitals response:", response.data);
       setHospitals(response.data || []);
     } catch (e) {
-      console.error('[Fetch Hospitals Error]', e);
-      Alert.alert('Hata', 'Hastaneler yüklenirken hata oluştu.');
+      handleApiError(e, 'Hastaneler yüklenirken hata oluştu.');
     } finally {
       setLoading(false);
     }
@@ -129,8 +144,7 @@ export default function AppointmentScreen({ setScreen, accessibilitySettings }) 
       const response = await apiClient.get(`/doctors?hospital_id=${hospitalId}&branch_id=${branchId}`);
       setDoctors(response.data || []);
     } catch (e) {
-      console.error('[Fetch Doctors Error]', e);
-      Alert.alert('Hata', 'Doktorlar yüklenirken hata oluştu.');
+      handleApiError(e, 'Doktorlar yüklenirken hata oluştu.');
     } finally {
       setLoading(false);
     }
@@ -146,8 +160,7 @@ export default function AppointmentScreen({ setScreen, accessibilitySettings }) 
       const response = await apiClient.get(url);
       setSlots(response.data || []);
     } catch (e) {
-      console.error('[Fetch Slots Error]', e);
-      Alert.alert('Hata', 'Uygun randevu saatleri yüklenirken hata oluştu.');
+      handleApiError(e, 'Uygun randevu saatleri yüklenirken hata oluştu.');
     } finally {
       setLoading(false);
     }
@@ -259,9 +272,7 @@ export default function AppointmentScreen({ setScreen, accessibilitySettings }) 
         Alert.alert('Hata', response.data.message || 'Randevu alınamadı.');
       }
     } catch (e) {
-      console.error('[Book Appointment Error]', e);
-      const errorMsg = e.response?.data?.detail || 'Randevu oluşturulamadı. Lütfen tekrar deneyin.';
-      Alert.alert('Hata', errorMsg);
+      handleApiError(e, 'Randevu oluşturulamadı. Lütfen tekrar deneyin.');
     } finally {
       setLoading(false);
     }
