@@ -49,14 +49,33 @@ export default function AppointmentScreen({ setScreen, accessibilitySettings }) 
     fetchCities();
   }, []);
 
+  const wakeUpBackend = async () => {
+    console.log("API URL:", apiClient.defaults.baseURL);
+    console.log("Checking backend health (waking up if sleeping)...");
+    try {
+      await apiClient.get('/health', { timeout: 60000 });
+      console.log("Backend is awake and healthy.");
+      return true;
+    } catch (e) {
+      console.warn("Backend health check failed or timed out:", e.message);
+      return false;
+    }
+  };
+
   const fetchCities = async () => {
     setLoading(true);
+    console.log("API URL:", apiClient.defaults.baseURL);
+    console.log("Fetching cities...");
     try {
+      await wakeUpBackend();
       const response = await apiClient.get('/locations/cities');
       setCities(response.data || []);
     } catch (e) {
       console.error('[Fetch Cities Error]', e);
-      Alert.alert('Hata', 'Şehirler yüklenirken hata oluştu.');
+      Alert.alert(
+        'Bağlantı Hatası',
+        'Veriler yüklenemedi. Lütfen internet bağlantınızı kontrol edin.'
+      );
     } finally {
       setLoading(false);
     }

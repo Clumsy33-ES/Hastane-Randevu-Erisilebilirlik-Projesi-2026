@@ -40,6 +40,10 @@ cors_env = os.getenv("CORS_ORIGINS", "")
 origins = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
+    "http://localhost:8081",
+    "http://127.0.0.1:8081",
+    "http://localhost:19006",
+    "http://127.0.0.1:19006",
     "https://hastane-randevu-erisilebilirlik-pro.vercel.app",
     "https://hastane-randevu-erisilebilirlik-projesi-2026-1wvk72arp.vercel.app",
 ]
