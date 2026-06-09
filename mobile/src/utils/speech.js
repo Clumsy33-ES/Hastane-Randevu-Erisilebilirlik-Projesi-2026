@@ -9,6 +9,9 @@ class VoiceService {
     this.recognitionService = null;
     this.isSpeaking = false;
     this.isListening = false;
+    this.shouldBeListening = false;
+    this.activeListener = null; // Stores { onResult, onEnd, onError, onStart }
+    this.restartTimer = null;
     this.appStateSubscription = null;
 
     // Stop speech and listening if app goes to background
@@ -41,23 +44,44 @@ class VoiceService {
       this.lastSpokenText = text;
       this.isSpeaking = true;
 
+      // Save state to resume microphone after speech finishes
+      const wasListening = this.shouldBeListening;
+      const savedListener = this.activeListener;
+
+      // Stop listening while speaking to prevent feedback loops
+      if (wasListening) {
+        this.stopListeningInternal();
+      }
+
       // Always clear previous speech before starting a new one
       await Speech.stop();
+
+      const handleSpeechFinished = () => {
+        this.isSpeaking = false;
+        if (onDone) onDone();
+        // Resume listening if we were listening before speaking started
+        if (wasListening && savedListener) {
+          this.startListening(
+            savedListener.onResult,
+            savedListener.onEnd,
+            savedListener.onError,
+            savedListener.onStart
+          );
+        }
+      };
 
       Speech.speak(text, {
         language: 'tr-TR',
         rate: 1.2,
         pitch: 1.0,
-        onDone: () => {
-          this.isSpeaking = false;
-          if (onDone) onDone();
-        },
+        onDone: handleSpeechFinished,
         onStopped: () => {
           this.isSpeaking = false;
+          // Don't auto-resume if explicitly stopped
         },
         onError: (err) => {
           console.log('[voiceService Error]', err);
-          this.isSpeaking = false;
+          handleSpeechFinished(); // Safe fallback: proceed with resuming listener
         },
       });
     } catch (error) {
@@ -76,39 +100,66 @@ class VoiceService {
   }
 
   startListening(onResult, onEnd, onError, onStart) {
-    // Stop any existing listener
-    this.stopListening();
+    this.shouldBeListening = true;
+    this.activeListener = { onResult, onEnd, onError, onStart };
 
-    this.recognitionService = new VoiceRecognitionService(
-      (text) => {
-        if (onResult) onResult(text);
-      },
-      () => {
-        this.isListening = false;
-        if (onEnd) onEnd();
-      },
-      (err) => {
-        this.isListening = false;
-        if (onError) onError(err);
-      },
-      () => {
-        this.isListening = true;
-        if (onStart) onStart();
-      }
-    );
+    const startActual = () => {
+      if (!this.shouldBeListening) return;
 
-    this.recognitionService.start().catch((err) => {
-      console.log('[voiceService startListening Error]', err);
-    });
+      // Stop any active session
+      this.stopListeningInternal();
+
+      this.recognitionService = new VoiceRecognitionService(
+        (text) => {
+          if (onResult) onResult(text);
+        },
+        () => {
+          this.isListening = false;
+          if (onEnd) onEnd();
+
+          // Auto-restart if we should still be listening and not speaking
+          if (this.shouldBeListening && !this.isSpeaking) {
+            if (this.restartTimer) clearTimeout(this.restartTimer);
+            this.restartTimer = setTimeout(() => {
+              startActual();
+            }, 400); // Small delay before restarting
+          }
+        },
+        (err) => {
+          this.isListening = false;
+          if (onError) onError(err);
+        },
+        () => {
+          this.isListening = true;
+          if (onStart) onStart();
+        }
+      );
+
+      this.recognitionService.start().catch((err) => {
+        console.log('[voiceService startListening Error]', err);
+      });
+    };
+
+    startActual();
   }
 
-  stopListening() {
+  stopListeningInternal() {
+    if (this.restartTimer) {
+      clearTimeout(this.restartTimer);
+      this.restartTimer = null;
+    }
     if (this.recognitionService) {
       this.recognitionService.stop().catch(() => {});
       this.recognitionService.destroy().catch(() => {});
       this.recognitionService = null;
     }
     this.isListening = false;
+  }
+
+  stopListening() {
+    this.shouldBeListening = false;
+    this.activeListener = null;
+    this.stopListeningInternal();
   }
 
   cleanup() {

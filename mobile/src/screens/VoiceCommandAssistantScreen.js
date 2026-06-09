@@ -852,7 +852,7 @@ export default function VoiceCommandAssistantScreen({ setScreen, accessibilitySe
               ? '🟢 Gerçek ses tanıma aktif — HTML5 Web Speech API kullanılıyor. Mikrofon izni tarayıcıdan isteniyor.'
               : recognitionMode === 'native'
               ? '🟢 Gerçek ses tanıma aktif — Cihaz mikrofonu kullanılıyor. Tr-TR dili seçili.'
-              : 'ℹ️ Expo Go ortamı — gerçek mikrofon desteği yok. Aşağıdaki seçenek butonlarını kullanın. Gerçek ses tanıma için web tarayıcıda veya native build\'de çalıştırın.'}
+              : 'ℹ️ Expo Go ortamı — bu ortamda cihaz mikrofonu ile gerçek ses tanıma desteklenmemektedir. Sesli rehber yönlendirmelerini takip ederek aşağıdaki büyük seçenek kartlarına dokunabilirsiniz.'}
           </Text>
         </View>
       </View>

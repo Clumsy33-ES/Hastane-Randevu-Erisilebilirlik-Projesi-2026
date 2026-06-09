@@ -12,8 +12,31 @@
  * NEVER crash in Expo Go; always fall back to simulation safely.
  */
 
-import { Platform } from 'react-native';
+import { Platform, PermissionsAndroid } from 'react-native';
 import Constants from 'expo-constants';
+
+/**
+ * Request audio recording permission on Android.
+ */
+export const requestMicrophonePermission = async () => {
+  if (Platform.OS === 'android') {
+    try {
+      const granted = await PermissionsAndroid.request(
+        PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
+        {
+          title: 'Mikrofon İzni',
+          message: 'Sesli asistanı kullanabilmeniz için mikrofon izni gereklidir.',
+          buttonPositive: 'İzin Ver',
+        }
+      );
+      return granted === PermissionsAndroid.RESULTS.GRANTED;
+    } catch (err) {
+      console.warn('[Permission Error]', err);
+      return false;
+    }
+  }
+  return true;
+};
 
 // ─── Expo Go detection ───────────────────────────────────────────────────────
 // executionEnvironment is 'storeClient' in Expo Go, 'standalone' or 'bare' otherwise.

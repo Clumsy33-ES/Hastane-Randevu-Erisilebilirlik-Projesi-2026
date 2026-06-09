@@ -19,33 +19,6 @@ export default function HomeScreen({ setScreen, accessibilitySettings }) {
   const theme = getTheme(accessibilitySettings);
   const { colors, fontSizes } = theme;
 
-  const startHomeListening = () => {
-    const mode = detectRecognitionMode();
-    if (mode !== 'simulation') {
-      voiceService.startListening(
-        (text) => {
-          const t = text.toLowerCase();
-          if (t.includes('randevu al') || t.includes('hastane randevusu') || t.includes('randevu almak istiyorum')) {
-            setScreen('appointment');
-          } else if (t.includes('randevularım') || t.includes('randevular')) {
-            setScreen('myAppointments');
-          } else if (t.includes('aile hekimi')) {
-            setScreen('familyPhysician');
-          } else if (t.includes('profil') || t.includes('ayarlar')) {
-            setScreen('profile');
-          } else if (t.includes('çıkış') || t.includes('çıkış yap')) {
-            handleLogout();
-          } else if (t.includes('tekrar') || t.includes('tekrar dinle') || t.includes('yardım')) {
-            handleSpeechGuide();
-          }
-        },
-        () => console.log('[Home STT Ended]'),
-        (err) => console.log('[Home STT Error]', err),
-        () => console.log('[Home STT Started]')
-      );
-    }
-  };
-
   // ─── Auto voice greeting on mount ───────────────────────────────────────
   useEffect(() => {
     voiceService.setScreen('home');
@@ -69,10 +42,7 @@ export default function HomeScreen({ setScreen, accessibilitySettings }) {
         + 'Mevcut randevularınızı dinlemek için "Randevularım" diyebilir, '
         + 'Aile hekimi işlemleri için "Aile Hekimi" diyebilir, '
         + 'Profil bilgileri için "Profil" diyebilir '
-        + 'veya ekranı kaydırarak seçenekleri inceleyebilirsiniz.',
-        () => {
-          startHomeListening();
-        }
+        + 'veya ekranı kaydırarak seçenekleri inceleyebilirsiniz.'
       );
     }, 600);
 
@@ -91,9 +61,7 @@ export default function HomeScreen({ setScreen, accessibilitySettings }) {
       + 'Dördüncü seçenek: Randevularım — aktif ve geçmiş randevularınızı takip edin. '
       + 'Beşinci seçenek: Profil ve Ayarlar — erişilebilirlik seçeneklerini düzenleyin. '
       + 'Çıkış yapmak için son seçeneği kullanabilirsiniz.',
-      () => {
-        startHomeListening();
-      },
+      null,
       true // force speak since manually triggered
     );
   };
