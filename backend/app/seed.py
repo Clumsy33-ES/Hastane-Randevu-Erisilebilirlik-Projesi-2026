@@ -21,6 +21,14 @@ def clear_db(db: Session):
     db.commit()
     print("Database cleared.")
 
+def generate_turkish_address(city, district):
+    streets = ["Atatürk Caddesi", "Cumhuriyet Caddesi", "Fatih Sultan Mehmet Bulvarı", "İnönü Caddesi", "Zübeyde Hanım Caddesi", "Mimar Sinan Sokak", "Gazi Mustafa Kemal Bulvarı", "Vatan Caddesi", "İstiklal Caddesi"]
+    mahalles = ["Hürriyet Mahallesi", "Cumhuriyet Mahallesi", "Yeni Mahalle", "Atatürk Mahallesi", "Fatih Mahallesi", "Bahçelievler Mahallesi", "Mimar Sinan Mahallesi"]
+    street = random.choice(streets)
+    mahalle = random.choice(mahalles)
+    no = random.randint(1, 150)
+    return f"{mahalle}, {street}, No: {no}, {district}/{city}"
+
 def seed_data(db: Session):
     clear_db(db)
     print("Starting fresh seed with realistic Turkish data...")
@@ -89,7 +97,7 @@ def seed_data(db: Session):
     hospitals = []
     # Add explicit requested hospitals
     for hd in hospitals_data:
-        h = Hospital(name=hd["name"], city=hd["city"], district=hd["district"], address=fake.address(), latitude=hd["lat"], longitude=hd["lng"], is_active=True)
+        h = Hospital(name=hd["name"], city=hd["city"], district=hd["district"], address=generate_turkish_address(hd["city"], hd["district"]), latitude=hd["lat"], longitude=hd["lng"], is_active=True)
         db.add(h)
         hospitals.append(h)
 
@@ -102,14 +110,13 @@ def seed_data(db: Session):
         "Elazığ": (38.6810, 39.2264)
     }
     
-    import random
     for city, dists in locations.items():
         for dist in dists:
             exists = any(h.city == city and h.district == dist for h in hospitals)
             if not exists:
                 lat = city_coords[city][0] + random.uniform(-0.05, 0.05) if city in city_coords else None
                 lng = city_coords[city][1] + random.uniform(-0.05, 0.05) if city in city_coords else None
-                h = Hospital(name=f"{city} {dist} Devlet Hastanesi", city=city, district=dist, address=fake.address(), latitude=lat, longitude=lng, is_active=True)
+                h = Hospital(name=f"{city} {dist} Devlet Hastanesi", city=city, district=dist, address=generate_turkish_address(city, dist), latitude=lat, longitude=lng, is_active=True)
                 db.add(h)
                 hospitals.append(h)
     db.commit()

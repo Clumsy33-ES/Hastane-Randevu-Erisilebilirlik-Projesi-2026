@@ -163,7 +163,10 @@ def get_cities():
     return [
         {"id": 1, "name": "Elazığ"},
         {"id": 2, "name": "Malatya"},
-        {"id": 3, "name": "Ankara"}
+        {"id": 3, "name": "Ankara"},
+        {"id": 4, "name": "İstanbul"},
+        {"id": 5, "name": "İzmir"},
+        {"id": 6, "name": "Diyarbakır"}
     ]
 
 @app.get("/locations/districts")
@@ -171,7 +174,10 @@ def get_districts(city_id: int):
     data = {
         1: [{"id": 1, "name": "Merkez"}, {"id": 2, "name": "Kovancılar"}],
         2: [{"id": 3, "name": "Battalgazi"}, {"id": 4, "name": "Yeşilyurt"}],
-        3: [{"id": 5, "name": "Çankaya"}, {"id": 6, "name": "Keçiören"}]
+        3: [{"id": 5, "name": "Çankaya"}, {"id": 6, "name": "Keçiören"}, {"id": 16, "name": "Yenimahalle"}],
+        4: [{"id": 7, "name": "Kadıköy"}, {"id": 8, "name": "Bakırköy"}, {"id": 9, "name": "Üsküdar"}],
+        5: [{"id": 10, "name": "Bornova"}, {"id": 11, "name": "Konak"}, {"id": 12, "name": "Karşıyaka"}],
+        6: [{"id": 13, "name": "Bağlar"}, {"id": 14, "name": "Sur"}, {"id": 15, "name": "Kayapınar"}]
     }
     return data.get(city_id, [])
 
@@ -185,12 +191,47 @@ def get_branches(db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/hospitals")
-def get_hospitals(district_id: Optional[int] = None, branch_id: Optional[int] = None, db: Session = Depends(get_db)):
+def get_hospitals(city_id: Optional[int] = None, district_id: Optional[int] = None, branch_id: Optional[int] = None, db: Session = Depends(get_db)):
     try:
-        hospitals = db.query(Hospital).filter(Hospital.is_active == True).all()
+        query = db.query(Hospital).filter(Hospital.is_active == True)
+
+        # Filter by city name
+        CITY_MAP = {
+            1: "Elazığ", 2: "Malatya", 3: "Ankara",
+            4: "İstanbul", 5: "İzmir", 6: "Diyarbakır"
+        }
+        if city_id and city_id in CITY_MAP:
+            city_name = CITY_MAP[city_id]
+            query = query.filter(Hospital.city == city_name)
+            
+        # Filter by district name
+        DISTRICT_MAP = {
+            1: "Merkez", 2: "Kovancılar",
+            3: "Battalgazi", 4: "Yeşilyurt",
+            5: "Çankaya", 6: "Keçiören", 16: "Yenimahalle",
+            7: "Kadıköy", 8: "Bakırköy", 9: "Üsküdar",
+            10: "Bornova", 11: "Konak", 12: "Karşıyaka",
+            13: "Bağlar", 14: "Sur", 15: "Kayapınar"
+        }
+        if district_id and district_id in DISTRICT_MAP:
+            district_name = DISTRICT_MAP[district_id]
+            query = query.filter(Hospital.district == district_name)
+
+        # Filter by branch: only hospitals that have at least one active doctor in that branch
+        if branch_id:
+            from sqlalchemy import exists
+            query = query.filter(
+                exists().where(
+                    (Doctor.hospital_id == Hospital.id) &
+                    (Doctor.branch_id == branch_id) &
+                    (Doctor.is_active == True)
+                )
+            )
+
+        hospitals = query.all()
         return [{
-            "id": h.id, 
-            "name": h.name, 
+            "id": h.id,
+            "name": h.name,
             "city": h.city,
             "district": h.district,
             "address": h.address,
