@@ -15,7 +15,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { MaterialIcons } from '@expo/vector-icons';
 import apiClient from '../api/api';
 import { getTheme, radius } from '../styles/theme';
-import { speak } from '../utils/speech';
+import { voiceService } from '../utils/speech';
 import AccessibleButton from '../components/AccessibleButton';
 
 export default function AppointmentScreen({ setScreen, accessibilitySettings }) {
@@ -55,10 +55,15 @@ export default function AppointmentScreen({ setScreen, accessibilitySettings }) 
 
   // Voice guide trigger on mount
   useEffect(() => {
+    voiceService.setScreen('appointment');
     if (accessibilitySettings?.voiceGuide) {
-      speak('Hastane randevusu ekranındasınız. Randevu almak için lütfen şehir seçimiyle başlayın.');
+      voiceService.speak('Hastane randevusu ekranındasınız. Randevu almak için lütfen şehir seçimiyle başlayın.');
     }
     fetchCities();
+
+    return () => {
+      voiceService.cleanup();
+    };
   }, []);
 
   const wakeUpBackend = async () => {
@@ -282,7 +287,7 @@ export default function AppointmentScreen({ setScreen, accessibilitySettings }) 
           { text: 'Tamam', onPress: () => setScreen('myAppointments') },
         ]);
         if (accessibilitySettings?.voiceGuide) {
-          speak(successMsg);
+          voiceService.speak(successMsg);
         }
       } else {
         Alert.alert('Hata', response.data.message || 'Randevu alınamadı.');
