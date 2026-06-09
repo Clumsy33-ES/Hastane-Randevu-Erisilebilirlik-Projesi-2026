@@ -12,7 +12,8 @@ apiClient.interceptors.request.use(
     try {
       const token = await AsyncStorage.getItem('token');
       console.log(`[API CLIENT] Sending ${config.method?.toUpperCase()} request to ${config.url}. Token present: ${!!token}`);
-      if (token) {
+      const isAuthEndpoint = config.url && (config.url.includes('/auth/login') || config.url.includes('/auth/register'));
+      if (token && !isAuthEndpoint) {
         config.headers = config.headers || {};
         config.headers.Authorization = `Bearer ${token}`;
       }

@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 from app.database import engine, SessionLocal, Base
 from app.models import User, Hospital, Branch, Doctor, AppointmentSlot, Appointment, FamilyPhysician
+from app.security import hash_password
 
 fake = Faker("tr_TR")
 
@@ -37,7 +38,7 @@ def seed_data(db: Session):
     admin = User(
         tc_no="11111111111",
         full_name="Admin User",
-        password_hash="1234",
+        password_hash=hash_password("1234"),
         role="admin",
         is_active=True
     )
@@ -54,7 +55,7 @@ def seed_data(db: Session):
         user = User(
             tc_no=tc,
             full_name=fake.name(),
-            password_hash="1234",
+            password_hash=hash_password("1234"),
             role="user",
             is_active=True
         )
