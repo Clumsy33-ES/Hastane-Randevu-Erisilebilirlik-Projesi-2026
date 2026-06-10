@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "mobile",
+    "name": "Sağlık Ses",
     "slug": "mobile",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -8,19 +8,26 @@
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "splash": {
-      "image": "./assets/splash-icon.png",
+      "image": "./assets/splash.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#F5EDED"
     },
     "ios": {
       "supportsTablet": true
     },
     "android": {
+      "package": "com.erisimlirandevu.app",
       "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
+        "foregroundImage": "./assets/icon.png",
+        "backgroundColor": "#D32F2F"
       },
-      "edgeToEdgeEnabled": true
+      "edgeToEdgeEnabled": true,
+      "permissions": [
+        "RECORD_AUDIO",
+        "INTERNET",
+        "VIBRATE",
+        "android.permission.RECORD_AUDIO"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -32,7 +39,14 @@
           "microphonePermission": "Randevu alma sesli komutları için mikrofona erişim izni gereklidir.",
           "speechRecognitionPermission": "Söylediklerinizi algılayabilmek için ses tanıma izni gereklidir."
         }
-      ]
-    ]
+      ],
+      "./plugins/withAndroidSupportExclude.js",
+      "expo-font"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "3b34965b-5337-4e3d-8e5e-3c74f169b1cf"
+      }
+    }
   }
 }

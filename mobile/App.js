@@ -202,7 +202,7 @@ const styles = StyleSheet.create({
   },
   floatingButtonContainer: {
     position: 'absolute',
-    top: 40,
+    bottom: 40,
     left: 0,
     right: 0,
     alignItems: 'center',

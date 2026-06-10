@@ -15,11 +15,21 @@ import { getTheme, radius } from '../styles/theme';
 import { voiceService } from '../utils/speech';
 import { detectRecognitionMode } from '../utils/voiceRecognition';
 
+let hasSpokenHomeIntro = false;
+
 export default function HomeScreen({ setScreen, accessibilitySettings }) {
   const [userRole, setUserRole] = useState('user');
   const [userName, setUserName] = useState('');
   const theme = getTheme(accessibilitySettings);
   const { colors, fontSizes } = theme;
+
+  const playIntro = (force = false) => {
+    voiceService.speak(
+      "Erişimli Randevu ana sayfasındasınız. Sesli Asistan, Hastane Randevusu, Aile Hekimi, Randevularım, Profil ve Ayarlar seçenekleri bulunmaktadır. Randevu almak için ‘randevu al’, randevularınızı görmek için ‘randevularım’, aile hekimi işlemleri için ‘aile hekimi’, yardım almak için ‘yardım’ diyebilirsiniz.",
+      null,
+      force // force speak overrides settings if user explicitly asked for help
+    );
+  };
 
   // ─── Auto voice greeting on mount ───────────────────────────────────────
   useEffect(() => {
@@ -44,17 +54,11 @@ export default function HomeScreen({ setScreen, accessibilitySettings }) {
           }
         }
         
-        const hasGreeted = await AsyncStorage.getItem('hasGreeted');
-        if (!hasGreeted) {
+        if (!hasSpokenHomeIntro) {
           setTimeout(() => {
-            voiceService.speak(
-              'Erişimli Randevu’ya hoş geldiniz. '
-              + 'Sesli komutları kapatmak için "ses kapat", '
-              + 'tekrar açmak için "ses aç" diyebilirsiniz. '
-              + 'Yardım için "yardım" diyebilirsiniz.'
-            );
+            playIntro(true); // Force true so it reads even if mic is disabled
           }, 600);
-          await AsyncStorage.setItem('hasGreeted', 'true');
+          hasSpokenHomeIntro = true;
         }
       } catch (e) {
         console.error('[Home] Error reading async storage:', e);
@@ -68,6 +72,11 @@ export default function HomeScreen({ setScreen, accessibilitySettings }) {
           const norm = text.toLowerCase().trim();
           console.log('[HomeScreen Voice] Received:', text);
           
+          if (norm.includes('yardım') || norm.includes('tekrar et') || norm.includes('seçenekleri söyle')) {
+            playIntro(true);
+            return;
+          }
+
           if (voiceService.handleGlobalCommand(text, setScreen, handleLogout)) {
             return;
           }
@@ -117,6 +126,7 @@ export default function HomeScreen({ setScreen, accessibilitySettings }) {
     console.log('[HomeScreen] handleLogout initiated');
     try {
       voiceService.cleanup();
+      hasSpokenHomeIntro = false;
       await AsyncStorage.removeItem('token');
       await AsyncStorage.removeItem('role');
       await AsyncStorage.removeItem('user');
