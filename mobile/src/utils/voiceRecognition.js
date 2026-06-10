@@ -16,6 +16,22 @@ import { Platform, PermissionsAndroid } from 'react-native';
 import Constants from 'expo-constants';
 
 /**
+ * Check audio recording permission on Android without requesting it.
+ */
+export const checkMicrophonePermission = async () => {
+  if (Platform.OS === 'android') {
+    try {
+      const granted = await PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.RECORD_AUDIO);
+      return granted;
+    } catch (err) {
+      console.warn('[Permission Check Error]', err);
+      return false;
+    }
+  }
+  return true;
+};
+
+/**
  * Request audio recording permission on Android.
  */
 export const requestMicrophonePermission = async () => {

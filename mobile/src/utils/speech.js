@@ -14,6 +14,9 @@ class VoiceService {
     this.restartTimer = null;
     this.appStateSubscription = null;
 
+    this.voiceEnabled = true; // Default to true. App can toggle this.
+    this.onVoiceEnabledChange = null;
+
     // Stop speech and listening if app goes to background
     if (Platform.OS !== 'web') {
       this.appStateSubscription = AppState.addEventListener('change', (nextAppState) => {
@@ -23,6 +26,62 @@ class VoiceService {
         }
       });
     }
+  }
+
+  setVoiceEnabled(enabled) {
+    this.voiceEnabled = enabled;
+    if (this.onVoiceEnabledChange) {
+      this.onVoiceEnabledChange(enabled);
+    }
+    if (!enabled) {
+      this.cleanup();
+      // Speak confirmation if disabled (forced)
+      this.speak("Sesli asistan kapatıldı.", null, true);
+    } else {
+      this.speak("Sesli asistan açıldı. Nasıl yardımcı olabilirim?", null, true);
+    }
+  }
+
+  handleGlobalCommand(transcript, navigateFn, logoutFn = null) {
+    if (!transcript) return false;
+    const norm = transcript.toLowerCase().trim();
+
+    // Ses Aç / Kapat
+    if (norm.includes('ses kapat') || norm.includes('sesli asistanı kapat') || norm.includes('mikrofonu kapat') || norm.includes('dinlemeyi durdur')) {
+      this.setVoiceEnabled(false);
+      return true; // Command handled
+    }
+    if (norm.includes('ses aç') || norm.includes('sesli asistanı aç') || norm.includes('mikrofonu aç') || norm.includes('beni dinle')) {
+      this.setVoiceEnabled(true);
+      return true;
+    }
+
+    // Only process other commands if voice is enabled
+    if (!this.voiceEnabled) {
+      return false;
+    }
+
+    if (norm.includes('çıkış') || norm.includes('çıkış yap')) {
+      if (logoutFn) {
+        logoutFn();
+        return true;
+      }
+    }
+
+    if (norm.includes('ana sayfa')) {
+      if (navigateFn) {
+        this.cleanup();
+        navigateFn('home');
+        return true;
+      }
+    }
+
+    if (norm.includes('yardım')) {
+      this.speak("Erişimli randevu sistemindesiniz. Sesli asistanı kapatmak için ses kapat, geri gitmek için geri, ana sayfaya dönmek için ana sayfa diyebilirsiniz.", null, true);
+      return true;
+    }
+
+    return false; // Not a global command, let the screen handle it
   }
 
   setScreen(screenName) {
@@ -48,6 +107,12 @@ class VoiceService {
       }
 
       if (!text || text.trim() === '') return;
+
+      // Skip normal speech if voice is disabled (unless forced)
+      if (!this.voiceEnabled && !force) {
+        if (onDone) onDone();
+        return;
+      }
 
       // Prevent duplicate reading on re-renders, unless forced (e.g., manual "listen again")
       if (!force && text === this.lastSpokenText) {
@@ -134,11 +199,16 @@ class VoiceService {
   }
 
   startListening(onResult, onEnd, onError, onStart) {
+    if (!this.voiceEnabled) {
+      console.log("[voiceService] Listening blocked, voiceEnabled is false.");
+      return;
+    }
+
     this.shouldBeListening = true;
     this.activeListener = { onResult, onEnd, onError, onStart };
 
     const startActual = () => {
-      if (!this.shouldBeListening) return;
+      if (!this.shouldBeListening || !this.voiceEnabled) return;
 
       // Stop any active session
       this.stopListeningInternal();

@@ -10,17 +10,9 @@ from app.security import hash_password
 fake = Faker("tr_TR")
 
 def clear_db(db: Session):
-    print("Clearing database...")
-    # Order matters for foreign keys
-    db.execute(text("TRUNCATE TABLE appointments RESTART IDENTITY CASCADE"))
-    db.execute(text("TRUNCATE TABLE appointment_slots RESTART IDENTITY CASCADE"))
-    db.execute(text("TRUNCATE TABLE family_physicians RESTART IDENTITY CASCADE"))
-    db.execute(text("TRUNCATE TABLE doctors RESTART IDENTITY CASCADE"))
-    db.execute(text("TRUNCATE TABLE hospitals RESTART IDENTITY CASCADE"))
-    db.execute(text("TRUNCATE TABLE branches RESTART IDENTITY CASCADE"))
-    db.execute(text("TRUNCATE TABLE users RESTART IDENTITY CASCADE"))
-    db.commit()
-    print("Database cleared.")
+    # DANGEROUS: Do not use in production or without explicit intent.
+    # TRUNCATE statements removed to prevent accidental data loss in Neon DB.
+    pass
 
 def generate_turkish_address(city, district):
     streets = ["Atatürk Caddesi", "Cumhuriyet Caddesi", "Fatih Sultan Mehmet Bulvarı", "İnönü Caddesi", "Zübeyde Hanım Caddesi", "Mimar Sinan Sokak", "Gazi Mustafa Kemal Bulvarı", "Vatan Caddesi", "İstiklal Caddesi"]
@@ -31,44 +23,54 @@ def generate_turkish_address(city, district):
     return f"{mahalle}, {street}, No: {no}, {district}/{city}"
 
 def seed_data(db: Session):
-    clear_db(db)
-    print("Starting fresh seed with realistic Turkish data...")
+    # clear_db(db) # Disabled to prevent accidental resets
+    print("Starting idempotent seed with realistic Turkish data...")
 
     # USERS
-    admin = User(
-        tc_no="11111111111",
-        full_name="Admin User",
-        password_hash=hash_password("1234"),
-        role="admin",
-        is_active=True
-    )
-    db.add(admin)
-
-    users = []
-    generated_tcs = {"11111111111"}
-    for _ in range(30):
-        while True:
-            tc = fake.numerify("###########")
-            if tc not in generated_tcs:
-                generated_tcs.add(tc)
-                break
-        user = User(
-            tc_no=tc,
-            full_name=fake.name(),
+    admin = db.query(User).filter(User.tc_no == "11111111111").first()
+    if not admin:
+        admin = User(
+            tc_no="11111111111",
+            full_name="Admin User",
             password_hash=hash_password("1234"),
-            role="user",
+            role="admin",
             is_active=True
         )
-        db.add(user)
-        users.append(user)
-    db.commit()
+        db.add(admin)
+        db.commit()
+        db.refresh(admin)
+
+    existing_users_count = db.query(User).count()
+    users = []
+    if existing_users_count < 30:
+        generated_tcs = {"11111111111"}
+        for _ in range(30 - existing_users_count):
+            while True:
+                tc = fake.numerify("###########")
+                if tc not in generated_tcs:
+                    generated_tcs.add(tc)
+                    break
+            user = User(
+                tc_no=tc,
+                full_name=fake.name(),
+                password_hash=hash_password("1234"),
+                role="user",
+                is_active=True
+            )
+            db.add(user)
+            users.append(user)
+        db.commit()
+    else:
+        users = db.query(User).filter(User.role == "user").all()
 
     # BRANCHES
     branch_names = ["Kardiyoloji", "Dahiliye", "Ortopedi", "Göz Hastalıkları", "Nöroloji"]
     branches = []
     for name in branch_names:
-        b = Branch(name=name, is_active=True)
-        db.add(b)
+        b = db.query(Branch).filter(Branch.name == name).first()
+        if not b:
+            b = Branch(name=name, is_active=True)
+            db.add(b)
         branches.append(b)
     db.commit()
 
@@ -84,7 +86,8 @@ def seed_data(db: Session):
         "İstanbul": ["Kadıköy", "Üsküdar", "Bakırköy"],
         "İzmir": ["Bornova", "Konak", "Karşıyaka"],
         "Diyarbakır": ["Kayapınar", "Bağlar", "Sur"],
-        "Elazığ": ["Merkez", "Kovancılar"]
+        "Elazığ": ["Merkez", "Kovancılar"],
+        "Malatya": ["Battalgazi", "Yeşilyurt"]
     }
 
     hospitals_data = [
@@ -92,7 +95,8 @@ def seed_data(db: Session):
         {"city": "İstanbul", "district": "Kadıköy", "name": "İstanbul Eğitim ve Araştırma Hastanesi", "lat": 41.0029, "lng": 28.9329},
         {"city": "İzmir", "district": "Konak", "name": "İzmir Devlet Hastanesi", "lat": 38.4237, "lng": 27.1428},
         {"city": "Diyarbakır", "district": "Kayapınar", "name": "Diyarbakır Gazi Yaşargil Eğitim ve Araştırma Hastanesi", "lat": 37.9351, "lng": 40.1583},
-        {"city": "Elazığ", "district": "Merkez", "name": "Fırat Üniversitesi Hastanesi", "lat": 38.6748, "lng": 39.2232}
+        {"city": "Elazığ", "district": "Merkez", "name": "Fırat Üniversitesi Hastanesi", "lat": 38.6748, "lng": 39.2232},
+        {"city": "Malatya", "district": "Battalgazi", "name": "Malatya Eğitim ve Araştırma Hastanesi", "lat": 38.3552, "lng": 38.3095}
     ]
 
     hospitals = []
@@ -108,7 +112,8 @@ def seed_data(db: Session):
         "İstanbul": (41.0082, 28.9784),
         "İzmir": (38.4192, 27.1287),
         "Diyarbakır": (37.9144, 40.2306),
-        "Elazığ": (38.6810, 39.2264)
+        "Elazığ": (38.6810, 39.2264),
+        "Malatya": (38.3552, 38.3095)
     }
     
     for city, dists in locations.items():
@@ -124,8 +129,21 @@ def seed_data(db: Session):
 
     # DOCTORS
     doctors = []
+    # Her hastanede her branştan en az 1 doktor olsun
+    for h in hospitals:
+        for b in branches:
+            doctor = Doctor(
+                full_name=fake.name(),
+                title="Dr.",
+                hospital_id=h.id,
+                branch_id=b.id,
+                is_active=True
+            )
+            db.add(doctor)
+            doctors.append(doctor)
+            
+    # Biraz da rastgele fazladan doktor ekleyelim (çeşitlilik için)
     for _ in range(50):
-        # Ensure full_name is populated and title is "Dr."
         doctor = Doctor(
             full_name=fake.name(),
             title="Dr.",
@@ -138,10 +156,11 @@ def seed_data(db: Session):
     db.commit()
 
     # SLOTS
-    times = ["09:00", "10:00", "11:00", "13:00", "14:00", "15:00"]
+    # Performansı korumak adına saatleri ve günleri optimum tutuyoruz
+    times = ["09:00", "09:30", "10:00", "10:30", "11:00", "11:30", "13:30", "14:00", "14:30", "15:00", "15:30", "16:00"]
     today = date.today()
     for doctor in doctors:
-        for day_offset in range(0, 11): # Bugün + önümüzdeki 10 gün
+        for day_offset in range(0, 10): # Bugün + önümüzdeki 9 gün
             slot_date = today + timedelta(days=day_offset)
             for t in times:
                 slot = AppointmentSlot(
@@ -152,28 +171,52 @@ def seed_data(db: Session):
                     is_active=True
                 )
                 db.add(slot)
-    db.commit()
+        db.commit() # Commit per doctor to avoid large transactions and deadlocks
 
     # APPOINTMENTS
     # Yaklaşık %20'sini dolu yap (en az %70 boş kalsın istendi)
     all_slots = db.query(AppointmentSlot).all()
     num_to_book = int(len(all_slots) * 0.2)
     selected_slots = random.sample(all_slots, min(num_to_book, len(all_slots)))
+    
+    count = 0
     for s in selected_slots:
         u = random.choice(users)
         s.is_booked = True
         apt = Appointment(user_id=u.id, doctor_id=s.doctor_id, slot_id=s.id, status="active")
         db.add(apt)
+        count += 1
+        if count % 100 == 0:
+            db.commit()
     db.commit()
 
     # FAMILY PHYSICIANS & SLOTS
     print("Seeding family physicians and slots...")
-    times = ["09:00", "10:00", "11:00", "13:00", "14:00", "15:00"]
+    times = ["09:00", "09:30", "10:00", "10:30", "11:00", "11:30", "13:30", "14:00", "14:30", "15:00", "15:30", "16:00"]
     today = date.today()
     
     fps = []
-    # Create 20 family physicians across different locations
-    for _ in range(20):
+    
+    specific_fps = [
+        {"name": "Dr. Ayşe Yılmaz", "city": "Elazığ", "district": "Merkez", "clinic": "Elazığ Merkez 1 Nolu Aile Sağlığı Merkezi"},
+        {"name": "Dr. Mehmet Demir", "city": "Elazığ", "district": "Merkez", "clinic": "Elazığ Merkez 2 Nolu Aile Sağlığı Merkezi"},
+        {"name": "Dr. Fatma Kaya", "city": "Malatya", "district": "Battalgazi", "clinic": "Battalgazi 3 Nolu Aile Sağlığı Merkezi"},
+        {"name": "Dr. Ahmet Çelik", "city": "İstanbul", "district": "Kadıköy", "clinic": "Kadıköy 4 Nolu Aile Sağlığı Merkezi"}
+    ]
+    
+    # Create the requested family physicians
+    for fp_data in specific_fps:
+        fp = FamilyPhysician(
+            doctor_name=fp_data["name"],
+            clinic_name=fp_data["clinic"],
+            city=fp_data["city"],
+            district=fp_data["district"]
+        )
+        db.add(fp)
+        fps.append(fp)
+        
+    # Add a few more random ones for other cities
+    for _ in range(10):
         city = random.choice(list(locations.keys()))
         dist = random.choice(locations[city])
         fp = FamilyPhysician(
@@ -184,11 +227,12 @@ def seed_data(db: Session):
         )
         db.add(fp)
         fps.append(fp)
+        
     db.commit()
 
     for fp in fps:
         # Generate slots for this family physician
-        for day_offset in range(0, 6): # Önümüzdeki 5 gün
+        for day_offset in range(0, 10): # Önümüzdeki 10 gün
             slot_date = today + timedelta(days=day_offset)
             for t in times:
                 slot = AppointmentSlot(
@@ -199,7 +243,7 @@ def seed_data(db: Session):
                     is_active=True
                 )
                 db.add(slot)
-    db.commit()
+        db.commit() # Commit per family physician
 
     # Assign family physicians to SOME users (leaving others null to test assignment flow)
     all_eligible_users = [admin] + users

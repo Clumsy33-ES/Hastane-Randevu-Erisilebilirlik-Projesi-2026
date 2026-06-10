@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   StyleSheet,
   View,
@@ -22,11 +22,17 @@ export default function FamilyPhysicianScreen({ setScreen, accessibilitySettings
   const { colors, fontSizes } = theme;
 
   const [loading, setLoading] = useState(false);
+  const isLoadingRef = useRef(false);
   const [physicianInfo, setPhysicianInfo] = useState(null); // { has_family_physician, id, doctor_name, clinic_name, city, district }
   const [slots, setSlots] = useState([]);
+  const [selectedDate, setSelectedDate] = useState(null);
+  const [bookingStep, setBookingStep] = useState(1); // 1: Date, 2: Slot, 3: Confirm
+  const [selectedSlot, setSelectedSlot] = useState(null);
+  const [isBooking, setIsBooking] = useState(false);
 
   // Assignment states (used when has_family_physician is false)
-  const [assignStep, setAssignStep] = useState(1); // 1: City, 2: District, 3: Doctor Selection
+  const [assignStep, setAssignStep] = useState(1); // 1: City, 2: District, 3: Doctor Selection, 4: Confirm Assign
+  const [selectedPhysicianToAssign, setSelectedPhysicianToAssign] = useState(null);
   const [selectedCity, setSelectedCity] = useState(null);
   const [selectedDistrict, setSelectedDistrict] = useState(null);
   const [cities, setCities] = useState([]);
@@ -34,18 +40,64 @@ export default function FamilyPhysicianScreen({ setScreen, accessibilitySettings
   const [physicians, setPhysicians] = useState([]);
 
   useEffect(() => {
+    let isMounted = true;
     voiceService.setScreen('familyPhysician');
+    
+    // Yalnızca ilk montajda "Aile hekimi ekranındasınız" demesi için ufak bir kontrol eklenebilir,
+    // ancak şu anki durumda adım değiştikçe re-mount gibi düşünerek sadece ilk açılışı varsayıyoruz.
+
+    const startListener = () => {
+      voiceService.startListening(
+        (text) => {
+          const norm = text.toLowerCase().trim();
+          console.log('[FamilyPhysician Voice]', norm);
+          
+          if (voiceService.handleGlobalCommand(norm, setScreen)) return;
+
+          // Eğer atama onayı adımındaysak
+          if (assignStep === 4 && selectedPhysicianToAssign) {
+            if (norm.includes('evet') || norm.includes('onayla') || norm.includes('ata')) {
+              performAssign();
+            } else if (norm.includes('hayır') || norm.includes('iptal') || norm.includes('vazgeç')) {
+              setAssignStep(3);
+              voiceService.speak('Atama işlemi iptal edildi. Farklı bir hekim seçebilirsiniz.');
+            }
+          }
+          // Eğer randevu onayı adımındaysak
+          else if (bookingStep === 3 && selectedSlot) {
+            if (norm.includes('evet') || norm.includes('onayla') || norm.includes('al')) {
+              performBooking();
+            } else if (norm.includes('hayır') || norm.includes('iptal') || norm.includes('vazgeç')) {
+              setBookingStep(2);
+              voiceService.speak('Randevu alma işlemi iptal edildi. Farklı bir saat seçebilirsiniz.');
+            }
+          }
+        },
+        () => {},
+        (err) => console.log('[FamilyPhysician Voice Error]', err),
+        () => console.log('[FamilyPhysician Voice Started]')
+      );
+    };
+
+    startListener();
+
+    return () => {
+      isMounted = false;
+      voiceService.stopListening();
+    };
+  }, [bookingStep, assignStep, selectedSlot, selectedPhysicianToAssign]);
+
+  // Sadece sayfa ilk açıldığında data yüklemek için:
+  useEffect(() => {
     if (accessibilitySettings?.voiceGuide) {
       voiceService.speak('Aile hekimi ekranındasınız.');
     }
     loadData();
-
-    return () => {
-      voiceService.cleanup();
-    };
   }, []);
 
   const loadData = async () => {
+    if (isLoadingRef.current) return;
+    isLoadingRef.current = true;
     setLoading(true);
     try {
       const response = await apiClient.get('/family-physician/me');
@@ -65,6 +117,7 @@ export default function FamilyPhysicianScreen({ setScreen, accessibilitySettings
       Alert.alert('Hata', 'Aile hekimi bilgileri yüklenirken hata oluştu.');
     } finally {
       setLoading(false);
+      isLoadingRef.current = false;
     }
   };
 
@@ -104,73 +157,102 @@ export default function FamilyPhysicianScreen({ setScreen, accessibilitySettings
     setAssignStep(3);
   };
 
-  const handleAssignPhysician = async (physician) => {
-    const performAssign = async () => {
-      setLoading(true);
-      try {
-        await apiClient.post('/family-physician/assign', {
-          family_physician_id: physician.id,
-        });
-        Alert.alert('Başarılı', 'Aile hekimi başarıyla atandı.');
-        loadData();
-      } catch (e) {
-        console.error('[Assign Error]', e);
-        Alert.alert('Hata', 'Aile hekimi atanırken hata oluştu.');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    const confirmMsg = `${physician.doctor_name} isimli hekimi aile hekiminiz olarak atamak istiyor musunuz?`;
-    if (Platform.OS === 'web') {
-      if (window.confirm(confirmMsg)) performAssign();
-    } else {
-      Alert.alert('Hekim Ata', confirmMsg, [
-        { text: 'İptal', style: 'cancel' },
-        { text: 'Evet, Ata', onPress: performAssign },
-      ]);
+  const handleAssignPhysician = (physician) => {
+    setSelectedPhysicianToAssign(physician);
+    setAssignStep(4);
+    if (accessibilitySettings?.voiceGuide) {
+      voiceService.speak(`${physician.doctor_name} isimli hekimi aile hekiminiz olarak atamak istiyor musunuz? Evet veya hayır diyebilirsiniz.`);
     }
   };
 
-  const handleBookSlot = async (slot) => {
-    const performBooking = async () => {
-      setLoading(true);
-      try {
-        const userDataStr = await AsyncStorage.getItem('user');
-        const userObj = JSON.parse(userDataStr || '{}');
+  const performAssign = async () => {
+    if (isBooking) return;
+    setIsBooking(true);
+    setLoading(true);
+    voiceService.stopListening();
+    try {
+      await apiClient.post('/family-physician/assign', {
+        family_physician_id: selectedPhysicianToAssign.id,
+      });
+      const successMsg = 'Aile hekimi başarıyla atandı.';
+      if (accessibilitySettings?.voiceGuide) {
+        await voiceService.speak(successMsg, () => { loadData(); }, true);
+      } else {
+        Alert.alert('Başarılı', successMsg);
+        loadData();
+      }
+    } catch (e) {
+      console.error('[Assign Error]', e);
+      const errorMsg = 'Aile hekimi atanırken hata oluştu.';
+      Alert.alert('Hata', errorMsg);
+      if (accessibilitySettings?.voiceGuide) voiceService.speak(errorMsg);
+    } finally {
+      setLoading(false);
+      setIsBooking(false);
+    }
+  };
 
-        await apiClient.post('/family-physician/book', {
-          user_id: userObj.id || 1,
-          family_physician_id: physicianInfo.id,
-          date: slot.date,
-          time: slot.time,
-          slot_id: slot.id,
-        });
+  const handleBookSlot = (slot) => {
+    setSelectedSlot(slot);
+    setBookingStep(3);
+    if (accessibilitySettings?.voiceGuide) {
+      const parts = slot.date.split('-');
+      const formattedDate = `${parts[2]} ${parts[1]} ${parts[0]}`;
+      voiceService.speak(`${formattedDate} günü saat ${slot.time} için randevu almak istiyor musunuz? Evet veya hayır diyebilirsiniz.`);
+    }
+  };
 
-        const msg = 'Aile hekimi randevunuz başarıyla oluşturuldu.';
+  const performBooking = async () => {
+    if (isBooking) return;
+    setIsBooking(true);
+    setLoading(true);
+    voiceService.stopListening();
+    try {
+      const userDataStr = await AsyncStorage.getItem('user');
+      const userObj = JSON.parse(userDataStr || '{}');
+
+      const response = await apiClient.post('/family-physician/book', {
+        user_id: userObj.id || 1,
+        family_physician_id: physicianInfo.id,
+        date: selectedSlot.date,
+        time: selectedSlot.time,
+        slot_id: selectedSlot.id,
+      });
+      
+      if (response.data && response.data.success === false) {
+          throw new Error(response.data.message || 'Randevu alınamadı.');
+      }
+
+      const msg = 'Randevunuz başarıyla oluşturuldu.';
+      if (accessibilitySettings?.voiceGuide) {
+        await voiceService.speak(msg, () => { setScreen('myAppointments'); }, true);
+      } else {
         Alert.alert('Başarılı', msg, [
           { text: 'Tamam', onPress: () => setScreen('myAppointments') },
         ]);
-        if (accessibilitySettings?.voiceGuide) {
-          voiceService.speak(msg);
-        }
-      } catch (e) {
-        console.error('[Book Slot Error]', e);
-        const errorMsg = e.response?.data?.detail || 'Randevu alınamadı.';
-        Alert.alert('Hata', errorMsg);
-      } finally {
-        setLoading(false);
       }
-    };
-
-    const confirmMsg = `${slot.date.split('-')[2]}.${slot.date.split('-')[1]}.${slot.date.split('-')[0]} günü saat ${slot.time} için randevu almak istiyor musunuz?`;
-    if (Platform.OS === 'web') {
-      if (window.confirm(confirmMsg)) performBooking();
-    } else {
-      Alert.alert('Randevu Onayı', confirmMsg, [
-        { text: 'Vazgeç', style: 'cancel' },
-        { text: 'Evet, Al', onPress: performBooking },
-      ]);
+    } catch (e) {
+      console.error('[Book Slot Error]', e);
+      const isSlotFull = e.response?.status === 400 || e.message?.includes('dolu') || e.response?.data?.detail?.includes('dolu');
+      const errorMsg = isSlotFull ? 'Bu saat dolu. Lütfen başka bir saat seçin.' : (e.response?.data?.detail || 'Randevu alınamadı.');
+      
+      Alert.alert('Hata', errorMsg);
+      
+      if (isSlotFull) {
+        setSelectedSlot(null);
+        if (accessibilitySettings?.voiceGuide) {
+          await voiceService.speak('Bu saat dolu. Lütfen başka bir saat seçin.', () => {
+             loadData().then(() => { setBookingStep(2); });
+          }, true);
+        } else {
+          loadData().then(() => { setBookingStep(2); });
+        }
+      } else {
+        if (accessibilitySettings?.voiceGuide) voiceService.speak(errorMsg);
+      }
+    } finally {
+      setLoading(false);
+      setIsBooking(false);
     }
   };
 
@@ -197,11 +279,51 @@ export default function FamilyPhysicianScreen({ setScreen, accessibilitySettings
   };
 
   const goBack = () => {
-    if (!physicianInfo?.has_family_physician && assignStep > 1) {
-      setAssignStep(assignStep - 1);
+    if (physicianInfo?.has_family_physician) {
+      if (bookingStep === 2) {
+        setBookingStep(1);
+      } else {
+        setScreen('home');
+      }
     } else {
-      setScreen('home');
+      if (assignStep > 1) {
+        setAssignStep(assignStep - 1);
+      } else {
+        setScreen('home');
+      }
     }
+  };
+
+  const getFilteredSlots = () => {
+    const now = new Date();
+    const todayStr = now.toISOString().split('T')[0];
+    const currentHour = now.getHours();
+    const currentMin = now.getMinutes();
+
+    return slots.filter(slot => {
+      if (!slot.date) return false;
+      if (slot.date < todayStr) return false;
+      if (slot.date === todayStr) {
+        if (!slot.time) return false;
+        const [slotHour, slotMin] = slot.time.split(':').map(Number);
+        if (slotHour < currentHour || (slotHour === currentHour && slotMin <= currentMin)) {
+          return false;
+        }
+      }
+      return true;
+    });
+  };
+
+  const getUniqueDates = () => {
+    const filtered = getFilteredSlots();
+    const dates = [...new Set(filtered.map(s => s.date))];
+    dates.sort();
+    return dates;
+  };
+
+  const getFilteredSlotsForSelectedDate = () => {
+    const filtered = getFilteredSlots();
+    return filtered.filter(s => s.date === selectedDate);
   };
 
   if (loading && !physicianInfo) {
@@ -260,46 +382,109 @@ export default function FamilyPhysicianScreen({ setScreen, accessibilitySettings
               </View>
             </View>
 
-            {/* List of slots */}
-            <Text style={[styles.slotsHeading, { color: colors.text, fontSize: fontSizes.large }]}>
-              Müsait Randevu Saatleri
-            </Text>
-
-            {slots.length === 0 ? (
-              <View style={styles.emptyContainer}>
-                <MaterialIcons name="event-busy" size={48} color={colors.muted} />
-                <Text style={[styles.emptyText, { color: colors.muted, fontSize: fontSizes.medium }]}>
-                  Müsait randevu saati bulunmamaktadır.
+            {/* List of slots/dates */}
+            {bookingStep === 1 && (
+              <>
+                <Text style={[styles.slotsHeading, { color: colors.text, fontSize: fontSizes.large }]}>
+                  Müsait Randevu Tarihleri
                 </Text>
+                {getUniqueDates().length === 0 ? (
+                  <View style={styles.emptyContainer}>
+                    <MaterialIcons name="event-busy" size={48} color={colors.muted} />
+                    <Text style={[styles.emptyText, { color: colors.muted, fontSize: fontSizes.medium }]}>
+                      Müsait randevu tarihi bulunmamaktadır.
+                    </Text>
+                  </View>
+                ) : (
+                  <FlatList
+                    data={getUniqueDates()}
+                    keyExtractor={(item) => item}
+                    renderItem={({ item }) => {
+                      const formattedDate = formatDateTurkish(item);
+                      return (
+                        <TouchableOpacity
+                          style={[styles.slotRow, { backgroundColor: colors.card, borderColor: colors.border }]}
+                          onPress={() => {
+                            setSelectedDate(item);
+                            setBookingStep(2);
+                          }}
+                          accessibilityRole="button"
+                          accessibilityLabel={formattedDate}
+                        >
+                          <Text style={[styles.slotTimeText, { color: colors.text, fontSize: fontSizes.large }]}>
+                            {formattedDate}
+                          </Text>
+                          <MaterialIcons name="chevron-right" size={24} color={colors.muted} />
+                        </TouchableOpacity>
+                      );
+                    }}
+                  />
+                )}
+              </>
+            )}
+            
+            {bookingStep === 2 && (
+              <>
+                <Text style={[styles.slotsHeading, { color: colors.text, fontSize: fontSizes.large }]}>
+                  Müsait Randevu Saatleri ({formatDateTurkish(selectedDate)})
+                </Text>
+                {getFilteredSlotsForSelectedDate().length === 0 ? (
+                  <View style={styles.emptyContainer}>
+                    <MaterialIcons name="event-busy" size={48} color={colors.muted} />
+                    <Text style={[styles.emptyText, { color: colors.muted, fontSize: fontSizes.medium }]}>
+                      Bu tarihte müsait saat bulunmamaktadır.
+                    </Text>
+                  </View>
+                ) : (
+                  <FlatList
+                    data={getFilteredSlotsForSelectedDate()}
+                    keyExtractor={(item) => item.id.toString()}
+                    renderItem={({ item }) => {
+                      return (
+                        <TouchableOpacity
+                          style={[styles.slotRow, { backgroundColor: colors.card, borderColor: colors.border }]}
+                          onPress={() => handleBookSlot(item)}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Saat ${item.time}`}
+                          accessibilityHint="Bu saat için aile hekimi randevusu almak üzere onay penceresi açar"
+                        >
+                          <View style={styles.slotLeft}>
+                            <MaterialIcons name="schedule" size={22} color={colors.primary} />
+                            <Text style={[styles.slotTimeText, { color: colors.text, fontSize: fontSizes.large }]}>
+                              {item.time}
+                            </Text>
+                          </View>
+                          <MaterialIcons name="chevron-right" size={24} color={colors.muted} />
+                        </TouchableOpacity>
+                      );
+                    }}
+                  />
+                )}
+              </>
+            )}
+
+            {bookingStep === 3 && selectedSlot && (
+              <View style={[styles.physicianCard, { backgroundColor: colors.card, borderRadius: radius.card, marginTop: 16 }]}>
+                <Text style={{ color: colors.text, fontSize: fontSizes.xlarge, fontWeight: 'bold', marginBottom: 16 }}>
+                  Randevu Onayı
+                </Text>
+                <Text style={{ color: colors.text, fontSize: fontSizes.medium, marginBottom: 8 }}>
+                  Tarih: {selectedSlot.date.split('-').reverse().join('.')}
+                </Text>
+                <Text style={{ color: colors.text, fontSize: fontSizes.medium, marginBottom: 8 }}>
+                  Saat: {selectedSlot.time}
+                </Text>
+                <Text style={{ color: colors.text, fontSize: fontSizes.medium, marginBottom: 8 }}>
+                  Hekim: {physicianInfo.doctor_name}
+                </Text>
+                <Text style={{ color: colors.text, fontSize: fontSizes.medium, marginBottom: 24 }}>
+                  Klinik: {physicianInfo.clinic_name}
+                </Text>
+                <View style={{ flexDirection: 'row', gap: 12 }}>
+                  <AccessibleButton title="Vazgeç" onPress={() => setBookingStep(2)} style={{ flex: 1, backgroundColor: colors.muted, borderColor: 'transparent' }} textStyle={{ color: '#fff' }} />
+                  <AccessibleButton title={isBooking ? "Alınıyor..." : "Onayla"} onPress={performBooking} disabled={isBooking} style={{ flex: 1 }} />
+                </View>
               </View>
-            ) : (
-              <FlatList
-                data={slots}
-                keyExtractor={(item) => item.id.toString()}
-                renderItem={({ item }) => {
-                  const formattedDate = formatDateTurkish(item.date);
-                  return (
-                    <TouchableOpacity
-                      style={[styles.slotRow, { backgroundColor: colors.card, borderColor: colors.border }]}
-                      onPress={() => handleBookSlot(item)}
-                      accessibilityRole="button"
-                      accessibilityLabel={`${formattedDate} saat ${item.time} randevusu`}
-                      accessibilityHint="Bu saat için aile hekimi randevusu almak üzere onay penceresi açar"
-                    >
-                      <View style={styles.slotLeft}>
-                        <MaterialIcons name="schedule" size={22} color={colors.primary} />
-                        <Text style={[styles.slotTimeText, { color: colors.text, fontSize: fontSizes.large }]}>
-                          {item.time}
-                        </Text>
-                      </View>
-                      <Text style={[styles.slotDateText, { color: colors.muted, fontSize: fontSizes.medium }]}>
-                        {formattedDate}
-                      </Text>
-                      <MaterialIcons name="chevron-right" size={24} color={colors.muted} />
-                    </TouchableOpacity>
-                  );
-                }}
-              />
             )}
           </View>
         ) : (
@@ -397,6 +582,24 @@ export default function FamilyPhysicianScreen({ setScreen, accessibilitySettings
                     )}
                   />
                 )}
+              </View>
+            )}
+
+            {assignStep === 4 && selectedPhysicianToAssign && (
+              <View style={[styles.physicianCard, { backgroundColor: colors.card, borderRadius: radius.card, marginTop: 16 }]}>
+                <Text style={{ color: colors.text, fontSize: fontSizes.xlarge, fontWeight: 'bold', marginBottom: 16 }}>
+                  Hekim Atama Onayı
+                </Text>
+                <Text style={{ color: colors.text, fontSize: fontSizes.medium, marginBottom: 8 }}>
+                  Hekim: {selectedPhysicianToAssign.doctor_name}
+                </Text>
+                <Text style={{ color: colors.text, fontSize: fontSizes.medium, marginBottom: 24 }}>
+                  Klinik: {selectedPhysicianToAssign.clinic_name}
+                </Text>
+                <View style={{ flexDirection: 'row', gap: 12 }}>
+                  <AccessibleButton title="Vazgeç" onPress={() => setAssignStep(3)} style={{ flex: 1, backgroundColor: colors.muted, borderColor: 'transparent' }} textStyle={{ color: '#fff' }} />
+                  <AccessibleButton title={isBooking ? "Atanıyor..." : "Evet, Ata"} onPress={performAssign} disabled={isBooking} style={{ flex: 1 }} />
+                </View>
               </View>
             )}
           </View>

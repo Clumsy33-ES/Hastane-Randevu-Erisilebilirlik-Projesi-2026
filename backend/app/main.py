@@ -20,6 +20,11 @@ import math
 # ── Database altyapısı ──
 from app.database import Base, engine, test_connection, get_db
 from app.models import User, Hospital, Branch, Doctor, AppointmentSlot, Appointment, FamilyPhysician
+from app.services.sms_service import SMSService
+import random
+
+# In-memory dictionary for SMS verification codes (for prototype)
+sms_verification_codes = {} # dict of tc_no -> code
 
 app = FastAPI(title="Hospital Appointment API")
 
@@ -96,6 +101,14 @@ class FamilyPhysicianAppointmentRequest(BaseModel):
     time: str
     slot_id: Optional[int] = None
 
+class ForgotPasswordRequest(BaseModel):
+    tc_identity_number: str
+
+class ResetPasswordRequest(BaseModel):
+    tc_identity_number: str
+    verification_code: str
+    new_password: str
+
 # --- Endpoints ---
 
 @app.get("/")
@@ -164,6 +177,48 @@ def register(request: RegisterRequest, db: Session = Depends(get_db)):
         "user_id": new_user.id
     }
 
+@app.post("/auth/forgot-password")
+def forgot_password(request: ForgotPasswordRequest, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.tc_no == request.tc_identity_number).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Bu TC Kimlik numarasına ait bir kayıt bulunamadı.")
+        
+    # Generate 6-digit verification code
+    code = str(random.randint(100000, 999999))
+    sms_verification_codes[request.tc_identity_number] = code
+    
+    # Send mock SMS
+    SMSService.send_verification_sms(user.phone, user.tc_no, code)
+    
+    return {
+        "success": True,
+        "message": "Doğrulama kodu telefonunuza gönderildi."
+    }
+
+@app.post("/auth/reset-password")
+def reset_password(request: ResetPasswordRequest, db: Session = Depends(get_db)):
+    expected_code = sms_verification_codes.get(request.tc_identity_number)
+    
+    if not expected_code or expected_code != request.verification_code:
+        raise HTTPException(status_code=400, detail="Doğrulama kodu hatalı veya süresi dolmuş.")
+        
+    user = db.query(User).filter(User.tc_no == request.tc_identity_number).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Kullanıcı bulunamadı.")
+        
+    if len(request.new_password) < 4:
+        raise HTTPException(status_code=400, detail="Yeni şifreniz en az 4 karakter olmalıdır.")
+        
+    user.password_hash = hash_password(request.new_password)
+    db.commit()
+    
+    # Remove the used code
+    del sms_verification_codes[request.tc_identity_number]
+    
+    return {
+        "success": True,
+        "message": "Şifreniz başarıyla güncellendi. Yeni şifrenizle giriş yapabilirsiniz."
+    }
 
 @app.get("/locations/cities")
 def get_cities():
@@ -336,15 +391,30 @@ def get_slots(
             return []
         
         # 3. Date filtering
+        from sqlalchemy import or_, and_
+        now = datetime.now()
+        today = now.date()
+        current_time_str = now.strftime("%H:%M")
+
         if date and date.strip():
             try:
                 date_obj = datetime.strptime(date, "%Y-%m-%d").date()
                 query = query.filter(AppointmentSlot.date == date_obj)
+                if date_obj == today:
+                    query = query.filter(AppointmentSlot.time >= current_time_str)
             except ValueError:
                 pass
         else:
-            # Show from today onwards
-            query = query.filter(AppointmentSlot.date >= datetime.now().date())
+            # Show from today onwards, but for today only >= current time
+            query = query.filter(
+                or_(
+                    AppointmentSlot.date > today,
+                    and_(
+                        AppointmentSlot.date == today,
+                        AppointmentSlot.time >= current_time_str
+                    )
+                )
+            )
                 
         # Order by nearest date and time
         slots = query.order_by(AppointmentSlot.date.asc(), AppointmentSlot.time.asc()).limit(20).all()
@@ -625,12 +695,23 @@ def get_family_physician_slots(db: Session = Depends(get_db), current_user: User
         if not user or not user.family_physician_id:
             return []
             
+        from sqlalchemy import or_, and_
+        now = datetime.now()
+        today = now.date()
+        current_time_str = now.strftime("%H:%M")
+
         fp_id = user.family_physician_id
         slots = db.query(AppointmentSlot).filter(
             AppointmentSlot.family_physician_id == fp_id,
             AppointmentSlot.is_active == True,
             AppointmentSlot.is_booked == False,
-            AppointmentSlot.date >= datetime.now().date()
+            or_(
+                AppointmentSlot.date > today,
+                and_(
+                    AppointmentSlot.date == today,
+                    AppointmentSlot.time >= current_time_str
+                )
+            )
         ).order_by(AppointmentSlot.date.asc(), AppointmentSlot.time.asc()).all()
         
         return [{

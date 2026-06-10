@@ -60,22 +60,49 @@ export default function RegisterScreen({ setScreen, accessibilitySettings }) {
 
       const { success, message, detail } = response.data;
 
-      if (success) {
-        const successMsg = 'Kayıt başarılı. Giriş yapabilirsiniz.';
-        Alert.alert('Başarılı', successMsg, [
-          { text: 'Tamam', onPress: () => setScreen('login') },
-        ]);
+      if (response.status === 200 || response.status === 201 || success) {
+        const successMsg = 'Kayıt başarılı. Giriş ekranına yönlendiriliyorsunuz.';
+        Alert.alert('Başarılı', successMsg);
         if (accessibilitySettings?.voiceGuide) {
           voiceService.speak(successMsg);
         }
+        
+        // Formu temizle
+        setFullName('');
+        setTcNo('');
+        setPhone('');
+        setPassword('');
+        
+        // Kısa bir süre sonra yönlendir
+        setTimeout(() => {
+          setScreen('login');
+        }, 1500);
       } else {
         const errorMsg = detail || message || 'Kayıt sırasında hata oluştu. Lütfen bilgilerinizi kontrol ediniz.';
         Alert.alert('Kayıt Başarısız', errorMsg);
+        if (accessibilitySettings?.voiceGuide) {
+          voiceService.speak(errorMsg);
+        }
       }
     } catch (error) {
       console.error('[Register Error]', error);
       const errorMsg = error.response?.data?.detail || 'Kayıt sırasında hata oluştu. Lütfen bilgilerinizi kontrol ediniz.';
-      Alert.alert('Kayıt Başarısız', errorMsg);
+      
+      if (error.response?.status === 400 && typeof errorMsg === 'string' && errorMsg.includes('zaten var')) {
+        const existMsg = 'Bu TC ile kayıtlı kullanıcı var. Lütfen giriş yapın.';
+        Alert.alert('Kayıt Başarısız', existMsg, [
+          { text: 'Giriş Yap', onPress: () => setScreen('login') },
+          { text: 'İptal', style: 'cancel' }
+        ]);
+        if (accessibilitySettings?.voiceGuide) {
+          voiceService.speak(existMsg);
+        }
+      } else {
+        Alert.alert('Kayıt Başarısız', errorMsg);
+        if (accessibilitySettings?.voiceGuide) {
+          voiceService.speak(errorMsg);
+        }
+      }
     } finally {
       setLoading(false);
     }

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, Component } from 'react';
 import {
   StyleSheet,
   View,
@@ -18,12 +18,44 @@ import { getTheme, radius } from '../styles/theme';
 import { voiceService } from '../utils/speech';
 import AccessibleButton from '../components/AccessibleButton';
 
-export default function AppointmentScreen({ setScreen, accessibilitySettings }) {
+class AppointmentScreenErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error, errorInfo) {
+    console.error("[AppointmentScreen Error Boundary Caught]:", error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <SafeAreaView style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 }}>
+          <Text style={{ fontSize: 18, fontWeight: 'bold', color: 'red', marginBottom: 10 }}>Bir hata oluştu.</Text>
+          <Text style={{ fontSize: 14, color: 'gray', textAlign: 'center' }}>
+            {this.state.error?.toString()}
+          </Text>
+        </SafeAreaView>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+function AppointmentScreenContent({ setScreen, accessibilitySettings }) {
   const theme = getTheme(accessibilitySettings);
   const { colors, fontSizes } = theme;
 
   const [step, setStep] = useState(1); // 1: City, 2: District, 3: Branch, 4: Hospital, 5: Doctor, 6: Slot, 7: Confirm
+  const [historyStack, setHistoryStack] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [isBooking, setIsBooking] = useState(false);
+  const lastSpokenContext = useRef('');
 
   // Selections
   const [selectedCity, setSelectedCity] = useState(null);
@@ -32,6 +64,7 @@ export default function AppointmentScreen({ setScreen, accessibilitySettings }) 
   const [selectedHospital, setSelectedHospital] = useState(null);
   const [selectedDoctor, setSelectedDoctor] = useState(null); // { id, name } or null (Fark etmez)
   const [selectedSlot, setSelectedSlot] = useState(null);
+  const [selectedDate, setSelectedDate] = useState(null);
 
   // List Data
   const [cities, setCities] = useState([]);
@@ -43,6 +76,78 @@ export default function AppointmentScreen({ setScreen, accessibilitySettings }) 
   const [pageOffset, setPageOffset] = useState(0);
   const isProcessing = React.useRef(false);
   const lastTranscript = React.useRef('');
+  const lastCommandTime = React.useRef(0);
+
+  const months = [
+    'Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran',
+    'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'
+  ];
+
+  // Helper to filter slots >= today's current date and time
+  const getFilteredSlots = (allSlots) => {
+    if (!allSlots) return [];
+    const now = new Date();
+    // Use ISO string format YYYY-MM-DD
+    const todayStr = now.toISOString().split('T')[0];
+    const currentHour = now.getHours();
+    const currentMin = now.getMinutes();
+
+    return allSlots.filter(slot => {
+      if (!slot.date) return false;
+      if (slot.date < todayStr) {
+        return false;
+      }
+      if (slot.date === todayStr) {
+        if (!slot.time) return false;
+        const [slotHour, slotMin] = slot.time.split(':').map(Number);
+        if (slotHour < currentHour || (slotHour === currentHour && slotMin <= currentMin)) {
+          return false;
+        }
+      }
+      return true;
+    });
+  };
+
+  // Extract sorted unique dates from filtered slots
+  const getUniqueDates = () => {
+    const filtered = getFilteredSlots(slots);
+    const dates = [...new Set(filtered.map(s => s.date))];
+    dates.sort();
+    return dates;
+  };
+
+  // Extract slots matching the selectedDate
+  const getFilteredSlotsForSelectedDate = () => {
+    const filtered = getFilteredSlots(slots);
+    return filtered.filter(s => s.date === selectedDate);
+  };
+
+  const formatTurkishDate = (dateStr) => {
+    if (!dateStr) return '';
+    const parts = dateStr.split('-');
+    if (parts.length !== 3) return dateStr;
+    const day = parseInt(parts[2], 10);
+    const monthIdx = parseInt(parts[1], 10) - 1;
+    const month = months[monthIdx] || '';
+    return `${day} ${month}`;
+  };
+
+  const formatTurkishDateWithRelative = (dateStr) => {
+    if (!dateStr) return '';
+    const now = new Date();
+    const todayStr = now.toISOString().split('T')[0];
+    const tomorrow = new Date(now);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const tomorrowStr = tomorrow.toISOString().split('T')[0];
+
+    const formatted = formatTurkishDate(dateStr);
+    if (dateStr === todayStr) {
+      return `bugün, ${formatted}`;
+    } else if (dateStr === tomorrowStr) {
+      return `yarın, ${formatted}`;
+    }
+    return formatted;
+  };
 
   const handleApiError = (e, defaultMsg) => {
     console.error('[API Error]', e);
@@ -65,6 +170,11 @@ export default function AppointmentScreen({ setScreen, accessibilitySettings }) 
       voiceService.cleanup();
     };
   }, []);
+
+  const advanceStep = (nextStep) => {
+    setHistoryStack(prev => [...prev, step]);
+    setStep(nextStep);
+  };
 
   const wakeUpBackend = async () => {
     console.log("API URL:", apiClient.defaults.baseURL);
@@ -186,89 +296,167 @@ export default function AppointmentScreen({ setScreen, accessibilitySettings }) 
     }
   };
 
-  const handleCitySelect = (city) => {
+  const handleCitySelect = async (city) => {
     setPageOffset(0);
     setSelectedCity(city);
-    // Cascade reset downstream selections
     setSelectedDistrict(null);
     setSelectedBranch(null);
     setSelectedHospital(null);
     setSelectedDoctor(null);
     setSelectedSlot(null);
+    setSelectedDate(null);
     setDistricts([]);
     setBranches([]);
     setHospitals([]);
     setDoctors([]);
     setSlots([]);
 
-    fetchDistricts(city.id);
-    setStep(2);
+    setLoading(true);
+    try {
+      const response = await apiClient.get(`/locations/districts?city_id=${city.id}`);
+      setDistricts(response.data || []);
+      advanceStep(2);
+    } catch (e) {
+      handleApiError(e, 'İlçeler yüklenirken hata oluştu.');
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleDistrictSelect = (district) => {
+  const handleDistrictSelect = async (district) => {
     setPageOffset(0);
     setSelectedDistrict(district);
-    // Cascade reset downstream selections
     setSelectedBranch(null);
     setSelectedHospital(null);
     setSelectedDoctor(null);
     setSelectedSlot(null);
+    setSelectedDate(null);
     setBranches([]);
     setHospitals([]);
     setDoctors([]);
     setSlots([]);
 
-    fetchBranches();
-    setStep(3);
+    setLoading(true);
+    try {
+      const response = await apiClient.get('/branches');
+      setBranches(response.data || []);
+      advanceStep(3);
+    } catch (e) {
+      handleApiError(e, 'Branşlar yüklenirken hata oluştu.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleBranchSelect = async (branch) => {
     setPageOffset(0);
     setSelectedBranch(branch);
-    // Cascade reset downstream selections
     setSelectedHospital(null);
     setSelectedDoctor(null);
     setSelectedSlot(null);
+    setSelectedDate(null);
     setHospitals([]);
     setDoctors([]);
     setSlots([]);
 
-    const data = await fetchHospitals(selectedCity.id, selectedDistrict.id, branch.id);
-    setHospitals(data);
-    setStep(4);
+    setLoading(true);
+    try {
+      const response = await apiClient.get(
+        `/hospitals?city_id=${selectedCity.id}&district_id=${selectedDistrict.id}&branch_id=${branch.id}`
+      );
+      let hospitalList = [];
+      if (Array.isArray(response.data)) {
+        hospitalList = response.data;
+      } else if (response.data && Array.isArray(response.data.hospitals)) {
+        hospitalList = response.data.hospitals;
+      } else if (response.data && Array.isArray(response.data.value)) {
+        hospitalList = response.data.value;
+      }
+      setHospitals(hospitalList);
+      advanceStep(4);
+    } catch (e) {
+      handleApiError(e, 'Hastaneler yüklenirken hata oluştu.');
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleHospitalSelect = (hospital) => {
+  const handleHospitalSelect = async (hospital) => {
     setPageOffset(0);
     setSelectedHospital(hospital);
-    // Cascade reset downstream selections
     setSelectedDoctor(null);
     setSelectedSlot(null);
+    setSelectedDate(null);
     setDoctors([]);
     setSlots([]);
 
-    fetchDoctors(hospital.id, selectedBranch.id);
-    setStep(5);
+    setLoading(true);
+    try {
+      const response = await apiClient.get(
+        `/doctors?hospital_id=${hospital.id}&branch_id=${selectedBranch.id}`
+      );
+      setDoctors(response.data || []);
+      advanceStep(5);
+    } catch (e) {
+      handleApiError(e, 'Doktorlar yüklenirken hata oluştu.');
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleDoctorSelect = (doctor) => {
+  const handleDoctorSelect = async (doctor) => {
     setPageOffset(0);
     setSelectedDoctor(doctor);
     setSelectedSlot(null);
+    setSelectedDate(null);
     setSlots([]);
 
-    fetchSlots(doctor?.id, selectedHospital.id, selectedBranch.id);
-    setStep(6);
+    setLoading(true);
+    try {
+      let url = `/appointments/slots?hospital_id=${selectedHospital.id}&branch_id=${selectedBranch.id}`;
+      if (doctor?.id) {
+        url += `&doctor_id=${doctor.id}`;
+      }
+      const response = await apiClient.get(url);
+      const fetchedSlots = response.data || [];
+      setSlots(fetchedSlots);
+      
+      const filtered = getFilteredSlots(fetchedSlots);
+      const dates = [...new Set(filtered.map(s => s.date))];
+      dates.sort();
+      
+      if (dates.length > 0) {
+        advanceStep(6);
+      } else {
+        await voiceService.speak("Uygun randevu tarihi bulunamadı.", () => {
+          startListeningForCurrentStep();
+        }, true);
+      }
+    } catch (e) {
+      handleApiError(e, 'Uygun randevu saatleri yüklenirken hata oluştu.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDateSelect = (dateStr) => {
+    setPageOffset(0);
+    setSelectedDate(dateStr);
+    setSelectedSlot(null);
+    advanceStep(7);
   };
 
   const handleSlotSelect = (slot) => {
     setPageOffset(0);
     setSelectedSlot(slot);
-    setStep(7);
+    advanceStep(8);
   };
 
   const handleConfirmBooking = async () => {
+    if (isBooking) return;
+    setIsBooking(true);
     setLoading(true);
+    voiceService.stopListening();
     try {
       const userDataStr = await AsyncStorage.getItem('user');
       const userObj = JSON.parse(userDataStr || '{}');
@@ -289,26 +477,47 @@ export default function AppointmentScreen({ setScreen, accessibilitySettings }) 
 
       if (response.data.success) {
         const successMsg = 'Randevunuz başarıyla oluşturuldu.';
-        Alert.alert('Başarılı', successMsg, [
-          { text: 'Tamam', onPress: () => setScreen('myAppointments') },
-        ]);
-        if (accessibilitySettings?.voiceGuide) {
-          voiceService.speak(successMsg);
-        }
+        await voiceService.speak(successMsg, () => {
+          setScreen('myAppointments');
+        }, true);
       } else {
-        Alert.alert('Hata', response.data.message || 'Randevu alınamadı.');
+        throw new Error(response.data.message || 'Bu randevu saati dolu');
       }
     } catch (e) {
-      handleApiError(e, 'Randevu oluşturulamadı. Lütfen tekrar deneyin.');
+      console.error('[Confirm Booking Error]', e);
+      const isSlotFull = e.response?.status === 400 || e.message?.includes('dolu');
+      
+      const errorMsg = isSlotFull ? 'Bu saat artık dolu. Lütfen başka bir saat seçin.' : 'Randevu oluşturulamadı. Lütfen tekrar deneyin.';
+      const voiceMsg = isSlotFull ? 'Bu saat artık dolu. Yeni uygun saatler listeleniyor.' : 'Randevu oluşturulamadı.';
+      
+      Alert.alert('Hata', errorMsg);
+      
+      if (isSlotFull) {
+        setSelectedSlot(null);
+        await voiceService.speak(voiceMsg, () => {
+          fetchSlots(selectedDoctor?.id, selectedHospital.id, selectedBranch.id).then(() => {
+            setPageOffset(0);
+            setStep(7);
+          });
+        }, true);
+      } else {
+        await voiceService.speak(voiceMsg, () => {
+          startListeningForCurrentStep();
+        }, true);
+      }
     } finally {
       setLoading(false);
+      setIsBooking(false);
     }
   };
 
   const goBackStep = () => {
+    lastSpokenContext.current = '';
     setPageOffset(0);
-    if (step > 1) {
-      setStep(step - 1);
+    if (historyStack.length > 0) {
+      const prevStep = historyStack[historyStack.length - 1];
+      setHistoryStack(prev => prev.slice(0, -1));
+      setStep(prevStep);
     } else {
       setScreen('home');
     }
@@ -323,8 +532,9 @@ export default function AppointmentScreen({ setScreen, accessibilitySettings }) 
       case 3: return 'branch';
       case 4: return 'hospital';
       case 5: return 'doctor';
-      case 6: return 'slot';
-      case 7: return 'confirm';
+      case 6: return 'date';
+      case 7: return 'slot';
+      case 8: return 'confirm';
       default: return 'city';
     }
   };
@@ -336,9 +546,23 @@ export default function AppointmentScreen({ setScreen, accessibilitySettings }) 
       case 3: return 'Branş seçimi';
       case 4: return 'Hastane seçimi';
       case 5: return 'Doktor seçimi';
-      case 6: return 'Saat seçimi';
-      case 7: return 'Randevu Onayı';
+      case 6: return 'Tarih seçimi';
+      case 7: return 'Uygun saatler';
+      case 8: return 'Randevu Onayı';
       default: return '';
+    }
+  };
+
+  const getCategoryNameForSpeech = (s) => {
+    switch (s) {
+      case 1: return 'şehirler';
+      case 2: return 'ilçeler';
+      case 3: return 'branşlar';
+      case 4: return 'hastaneler';
+      case 5: return 'doktorlar';
+      case 6: return 'tarihler';
+      case 7: return 'saatler';
+      default: return 'seçenekler';
     }
   };
 
@@ -377,76 +601,162 @@ export default function AppointmentScreen({ setScreen, accessibilitySettings }) 
       case 3: rawList = branches; break;
       case 4: rawList = hospitals; break;
       case 5: rawList = doctors; break;
-      case 6: rawList = slots; break;
+      case 6: {
+        rawList = getUniqueDates().map(d => ({ name: d, dateStr: d }));
+        break;
+      }
+      case 7: {
+        rawList = getFilteredSlotsForSelectedDate();
+        break;
+      }
       default: break;
     }
     
-    return rawList.map((item, idx) => {
-      let label = '';
-      if (step === 6) {
-        label = `saat ${item.time}`;
-      } else {
-        label = item.name || '';
-      }
-      return {
-        number: idx + 1,
-        label: label,
-        value: item
-      };
-    });
+    let formatted = [];
+    if (!Array.isArray(rawList)) {
+      rawList = [];
+    }
+
+    if (step === 5) {
+      formatted.push({
+        number: 1,
+        label: 'Fark etmez',
+        value: null
+      });
+      rawList.forEach((item, idx) => {
+        formatted.push({
+          number: idx + 2,
+          label: `Doktor ${item.full_name}`,
+          value: item
+        });
+      });
+    } else if (step === 6) {
+      rawList.forEach((item, idx) => {
+        formatted.push({
+          number: idx + 1,
+          label: formatTurkishDateWithRelative(item.dateStr),
+          value: item.dateStr
+        });
+      });
+    } else if (step === 7) {
+      rawList.forEach((item, idx) => {
+        formatted.push({
+          number: idx + 1,
+          label: `Saat ${item.time}`,
+          value: item
+        });
+      });
+    } else {
+      rawList.forEach((item, idx) => {
+        formatted.push({
+          number: idx + 1,
+          label: item.name || '',
+          value: item
+        });
+      });
+    }
+    return formatted;
   };
 
-  const speakOptions = async (stepTitle, optionsList, offset = 0) => {
-    if (step === 7) {
-      if (selectedSlot) {
-        const confirmMsg = `${selectedBranch?.name} branşında, ${selectedHospital?.name} hastanesinde, ${selectedSlot?.doctor_name} hekiminden, ${selectedSlot?.date} günü saat ${selectedSlot?.time} için randevu almak istiyorsunuz. Onaylıyor musunuz? Evet veya hayır deyin.`;
-        await voiceService.speak(confirmMsg, () => {
-          startListeningForCurrentStep();
-        }, true);
-      }
-      return;
+  const buildOptionsPrompt = (currentStep, optionsList, offset) => {
+    if (currentStep === 8) {
+      return `Randevunuz ${selectedHospital?.name || ''}, ${selectedBranch?.name || ''}, Doktor ${selectedDoctor?.full_name || ''}, saat ${selectedSlot?.time || ''} için oluşturulacak. Onaylıyor musunuz?`;
+    }
+    
+    if (!optionsList || optionsList.length === 0) {
+      return '';
     }
 
-    if (optionsList.length === 0) {
-      const emptyMsg = `${stepTitle} için uygun seçenek bulunamadı. Önceki adıma dönmek için geri diyebilirsiniz.`;
-      await voiceService.speak(emptyMsg, () => {
-        startListeningForCurrentStep();
-      }, true);
-      return;
-    }
+    let text = '';
+    const isFirstPage = offset === 0;
+    
+    if (currentStep === 1) text = isFirstPage ? "Şehir seçimi. Bulunan şehirler: " : "Diğer şehirler: ";
+    else if (currentStep === 2) text = isFirstPage ? "İlçe seçimi. Bulunan ilçeler: " : "Diğer ilçeler: ";
+    else if (currentStep === 3) text = isFirstPage ? "Branş seçimi. Bulunan branşlar: " : "Diğer branşlar: ";
+    else if (currentStep === 4) text = isFirstPage ? "Hastane seçimi. Bulunan hastaneler: " : "Diğer hastaneler: ";
+    else if (currentStep === 5) text = isFirstPage ? "Doktor seçimi. Bulunan doktorlar: " : "Diğer doktorlar: ";
+    else if (currentStep === 6) text = isFirstPage ? "Tarih seçimi. Bulunan tarihler: " : "Diğer tarihler: ";
+    else if (currentStep === 7) text = isFirstPage ? "Saat seçimi. Uygun saatler: " : "Diğer saatler: ";
 
     const chunk = optionsList.slice(offset, offset + 5);
-    let text = `${stepTitle}. `;
-    
-    if (step === 1 && offset === 0) {
-      text = `Hastane randevusu ekranındasınız. ${stepTitle}. `;
-    }
-
     chunk.forEach((opt) => {
-      // Speak the index number relative to its display on screen (1-5)
-      const visualNum = opt.number - offset;
-      text += `${visualNum} ${opt.label}, `;
+      const visualNum = opt.number - offset; // Always 1 to 5 for users
+      text += `${visualNum} ${opt.label}. `;
     });
 
     if (optionsList.length > offset + 5) {
-      text += "Daha fazlası için devam deyin. ";
+      text += "Sonraki seçenekler için devam deyin. ";
     }
-    
-    if (step === 5) {
-      text += "Doktor isimleri uzun olabilir, seçmek için numara söyleyebilirsiniz. ";
-    }
-    
-    text += "Seçmek için seçenek adını veya numarasını söyleyin.";
 
-    await voiceService.speak(text, () => {
+    if (currentStep === 5) {
+      text += "Doktor isimleri uzun olabilir, numara söyleyebilirsiniz.";
+    } else if (currentStep === 7) {
+      text += "Saat numarasını söyleyin.";
+    } else {
+      text += "Seçmek için adını veya numarasını söyleyin.";
+    }
+
+    return text;
+  };
+
+  const triggerStepAnnouncement = async () => {
+    voiceService.stopListening();
+    const opts = getFormattedOptions();
+    
+    const prompt = buildOptionsPrompt(step, opts, pageOffset);
+    console.log('[VOICE]', 'Step:', step, 'Options:', opts.length);
+    console.log('[VOICE]', 'Generated Prompt:', prompt);
+
+    if (opts.length === 0 && step !== 8 && !loading) {
+      // API has not returned data yet, or it's genuinely empty.
+      // If genuinely empty, we shouldn't get stuck.
+      // But let's let the user know if they try to repeat
+      return;
+    }
+
+    if (prompt) {
+      const currentContext = `step_${step}_offset_${pageOffset}_len_${opts.length}`;
+      if (lastSpokenContext.current === currentContext) {
+        console.log('[VOICE] Already spoken this context, skipping speak.');
+        startListeningForCurrentStep();
+        return;
+      }
+      lastSpokenContext.current = currentContext;
+
+      await voiceService.speak(prompt, () => {
+        startListeningForCurrentStep();
+      }, true);
+    } else {
       startListeningForCurrentStep();
-    }, true);
+    }
   };
 
   const findMatchingOption = (transcript, optionsList, offset = 0) => {
     const normalized = normalizeText(transcript);
+    const tokens = normalized.split(/\s+/);
     const chunk = optionsList.slice(offset, offset + 5);
 
+    // 1. Strict Slot Time Match (Step 7)
+    if (step === 7) {
+      const cleanTranscript = normalized.replace(/\s+/g, "").replace(/:/g, "");
+      const exactTimeMatch = chunk.find(opt => {
+        if (!opt.value) return false;
+        const timeStr = opt.value.time; // e.g. "15:00"
+        const hours = timeStr.split(':')[0]; // "15"
+        const cleanTime = timeStr.replace(":", ""); // "1500"
+        
+        // Exact "1500" or matching hours
+        return cleanTranscript === cleanTime || cleanTranscript.includes(cleanTime) || 
+               cleanTranscript === hours || cleanTranscript === `saat${hours}`;
+      });
+      if (exactTimeMatch) return exactTimeMatch;
+    }
+
+    // 2. Strict Exact Label Match
+    const exactMatch = chunk.find(opt => normalizeText(opt.label) === normalized);
+    if (exactMatch) return exactMatch;
+
+    // 3. Fallback to Number Matching
     const TurkishNumberMap = {
       "bir": 1, "birinci": 1, "1": 1, "1.": 1, "numara bir": 1,
       "iki": 2, "ikinci": 2, "2": 2, "2.": 2, "numara iki": 2,
@@ -457,7 +767,8 @@ export default function AppointmentScreen({ setScreen, accessibilitySettings }) 
 
     let matchedNum = -1;
     for (const key of Object.keys(TurkishNumberMap)) {
-      if (normalized === key || normalized.includes(key)) {
+      // Must match whole word to prevent "15" triggering "1"
+      if (normalized === key || tokens.includes(key)) {
         matchedNum = TurkishNumberMap[key];
         break;
       }
@@ -470,37 +781,22 @@ export default function AppointmentScreen({ setScreen, accessibilitySettings }) 
       }
     }
 
-    // Exact match on label
-    const exactMatch = chunk.find(opt => normalizeText(opt.label) === normalized);
-    if (exactMatch) return exactMatch;
-
-    // Partial match in currently visible chunk
-    const chunkPartialMatch = chunk.find(opt => 
-      normalized.includes(normalizeText(opt.label)) || 
-      normalizeText(opt.label).includes(normalized)
-    );
-    if (chunkPartialMatch) return chunkPartialMatch;
-
-    // Special slots time fallback match
+    // 4. Fallback for "en yakın tarih"
     if (step === 6) {
-      const slotTimeMatch = chunk.find(opt => {
-        const timeStr = opt.value.time;
-        const cleanTime = timeStr.replace(":", "");
-        const cleanTranscript = normalized.replace(" ", "").replace(":", "");
-        
-        if (cleanTranscript.includes("dokuz") || cleanTranscript.includes("0900") || cleanTranscript.includes("9")) {
-          if (timeStr.startsWith("09:") || timeStr.startsWith("9:")) return true;
+      if (normalized.includes("en yakin") || normalized.includes("yakin") || normalized.includes("ilk")) {
+        if (optionsList.length > 0) {
+          return optionsList[0];
         }
-        if (cleanTranscript.includes("on otuz") || cleanTranscript.includes("1030") || cleanTranscript.includes("10:30")) {
-          if (timeStr.startsWith("10:30")) return true;
-        }
-        if (cleanTranscript.includes("on dort") || cleanTranscript.includes("1400") || cleanTranscript.includes("14")) {
-          if (timeStr.startsWith("14:")) return true;
-        }
-        return cleanTranscript.includes(cleanTime) || cleanTranscript.includes(timeStr);
-      });
-      if (slotTimeMatch) return slotTimeMatch;
+      }
     }
+
+    // 5. Partial match in currently visible chunk
+    const chunkPartialMatch = chunk.find(opt => {
+      const normLabel = normalizeText(opt.label);
+      if (!normalized || !normLabel) return false;
+      return normalized.includes(normLabel) || normLabel.includes(normalized);
+    });
+    if (chunkPartialMatch) return chunkPartialMatch;
 
     return null;
   };
@@ -508,21 +804,24 @@ export default function AppointmentScreen({ setScreen, accessibilitySettings }) 
   const executeSelection = async (value) => {
     switch (step) {
       case 1:
-        handleCitySelect(value);
+        await handleCitySelect(value);
         break;
       case 2:
-        handleDistrictSelect(value);
+        await handleDistrictSelect(value);
         break;
       case 3:
         await handleBranchSelect(value);
         break;
       case 4:
-        handleHospitalSelect(value);
+        await handleHospitalSelect(value);
         break;
       case 5:
-        handleDoctorSelect(value);
+        await handleDoctorSelect(value);
         break;
       case 6:
+        handleDateSelect(value);
+        break;
+      case 7:
         handleSlotSelect(value);
         break;
       default:
@@ -531,6 +830,15 @@ export default function AppointmentScreen({ setScreen, accessibilitySettings }) 
   };
 
   const handleVoiceInput = async (transcript) => {
+    console.log(`[VOICE] Step: ${step} | Transcript: '${transcript}'`);
+    
+    if (!transcript || transcript.trim() === '') {
+      console.log("[Voice Command] Empty transcript, ignoring silently.");
+      // If STT stopped and returned empty, we just restart listening without error speech
+      startListeningForCurrentStep();
+      return;
+    }
+
     if (isProcessing.current) {
       console.log("[Voice Command] Already processing, ignoring:", transcript);
       return;
@@ -543,19 +851,80 @@ export default function AppointmentScreen({ setScreen, accessibilitySettings }) 
       console.log("Current voice step:", getStepName(step));
       console.log("Transcript:", transcript);
 
-      if (normalized === lastTranscript.current) {
-        console.log("[Voice Command] Duplicate transcript, ignoring:", transcript);
+      const now = Date.now();
+      if (normalized === lastTranscript.current && (now - lastCommandTime.current) < 2000) {
+        console.log("[Voice Command] Duplicate transcript within 2s, ignoring:", transcript);
         isProcessing.current = false;
         startListeningForCurrentStep();
         return;
       }
       lastTranscript.current = normalized;
+      lastCommandTime.current = now;
 
-      // Handle navigation/system commands first
-      if (normalized === 'geri' || normalized === 'geri don' || normalized === 'geri git' || normalized === 'iptal') {
+      // Handle global voice commands FIRST (ses aç, ses kapat, yardım, vs)
+      if (voiceService.handleGlobalCommand(transcript, setScreen)) {
+        isProcessing.current = false;
+        return;
+      }
+
+      // Handle navigation/system commands
+      const isHomeCommand = ['ana sayfa', 'anasayfa', 'ana menu', 'menuye don', 'basa don'].some(cmd => normalized === cmd || normalized.includes(cmd));
+      if (isHomeCommand) {
+        setScreen('home');
+        isProcessing.current = false;
+        return;
+      }
+
+      const isBackCommand = ['geri', 'onceki', 'geri don'].some(cmd => normalized === cmd || normalized.includes(cmd));
+      if (isBackCommand) {
         goBackStep();
         isProcessing.current = false;
         return;
+      }
+      
+      const isAnotherDayCommand = ['baska gun', 'baska tarih', 'farkli gun', 'farkli tarih'].some(cmd => normalized.includes(cmd));
+      if (isAnotherDayCommand) {
+        if (step === 7) {
+          setSelectedDate(null);
+          setSelectedSlot(null);
+          setPageOffset(0);
+          setHistoryStack(prev => prev.filter(p => p !== 6)); // ensure 6 is not duplicated
+          advanceStep(6);
+        } else {
+          await voiceService.speak("Başka gün seçimi sadece saat seçimi ekranında yapılabilir.", () => {
+            startListeningForCurrentStep();
+          }, true);
+        }
+        isProcessing.current = false;
+        return;
+      }
+
+      if (normalized === 'iptal') {
+        goBackStep();
+        isProcessing.current = false;
+        return;
+      }
+      
+      if (step === 8) {
+        console.log("[Confirm Check] Transcript:", transcript);
+        console.log("[Confirm Check] Selected slot:", selectedSlot);
+        const confirmCommands = ['evet', 'onayliyorum', 'onayla', 'tamam', 'olur', 'olumlu'];
+        const isConfirm = confirmCommands.some(cmd => normalized === cmd || normalized.includes(cmd));
+        if (isConfirm) {
+          handleConfirmBooking();
+          isProcessing.current = false;
+          return;
+        } else if (['hayir', 'iptal', 'geri'].some(cmd => normalized === cmd || normalized.includes(cmd))) {
+          goBackStep();
+          isProcessing.current = false;
+          return;
+        } else {
+          await voiceService.speak("Lütfen evet veya hayır deyin.", () => {
+            startListeningForCurrentStep();
+          }, true);
+          isProcessing.current = false;
+          return;
+        }
       }
       if (normalized === 'ana sayfa' || normalized === 'home') {
         setScreen('home');
@@ -567,37 +936,18 @@ export default function AppointmentScreen({ setScreen, accessibilitySettings }) 
         isProcessing.current = false;
         return;
       }
-      if (normalized === 'tekrar et' || normalized === 'tekrar') {
-        const stepTitle = getStepTitle(step);
-        const opts = getFormattedOptions();
-        await speakOptions(stepTitle, opts, pageOffset);
+      if (normalized === 'tekrar et' || normalized === 'tekrar' || normalized === 'yardim' || normalized === 'secenekleri soyle') {
+        lastSpokenContext.current = '';
+        await triggerStepAnnouncement();
         isProcessing.current = false;
         return;
       }
       if (normalized === 'devam' || normalized === 'devam et' || normalized === 'sonraki') {
         const opts = getFormattedOptions();
         if (pageOffset + 5 < opts.length) {
-          const newOffset = pageOffset + 5;
-          setPageOffset(newOffset);
-          const stepTitle = getStepTitle(step);
-          await speakOptions(stepTitle, opts, newOffset);
+          setPageOffset(pageOffset + 5);
         } else {
           await voiceService.speak("Başka seçenek kalmadı. Baştan dinlemek için tekrar et diyebilirsiniz.", () => {
-            startListeningForCurrentStep();
-          }, true);
-        }
-        isProcessing.current = false;
-        return;
-      }
-
-      if (step === 7) {
-        if (normalized.includes("evet") || normalized.includes("onayla") || normalized.includes("onayliyorum") || normalized.includes("kabul")) {
-          await handleConfirmBooking();
-        } else if (normalized.includes("hayir") || normalized.includes("iptal") || normalized.includes("geri")) {
-          goBackStep();
-          await voiceService.speak("Randevu onaylama iptal edildi, önceki adıma dönüldü.", null, true);
-        } else {
-          await voiceService.speak("Lütfen evet veya hayır diyerek randevuyu onaylayın.", () => {
             startListeningForCurrentStep();
           }, true);
         }
@@ -613,8 +963,11 @@ export default function AppointmentScreen({ setScreen, accessibilitySettings }) 
         console.log("Matched option:", matchedOpt);
         await executeSelection(matchedOpt.value);
       } else {
-        console.log("No match found for:", transcript);
-        await voiceService.speak("Söylediğinizi eşleştiremedim. Lütfen tekrar deneyin.", () => {
+        const fallbackMsg = step === 7 
+          ? "Bu saat için uygun randevu bulunamadı. Mevcut saatleri tekrar okuyorum."
+          : "Anlayamadım. Lütfen seçeneklerden birini söyleyin.";
+
+        await voiceService.speak(fallbackMsg, () => {
           startListeningForCurrentStep();
         }, true);
       }
@@ -642,19 +995,12 @@ export default function AppointmentScreen({ setScreen, accessibilitySettings }) 
       return;
     }
 
-    const currentStepTitle = getStepTitle(step);
-    const opts = getFormattedOptions();
-
-    if (accessibilitySettings?.voiceGuide) {
-      speakOptions(currentStepTitle, opts, pageOffset);
-    } else {
-      startListeningForCurrentStep();
-    }
+    triggerStepAnnouncement();
 
     return () => {
       voiceService.stopListening();
     };
-  }, [step, loading, cities.length, districts.length, branches.length, hospitals.length, doctors.length, slots.length, pageOffset]);
+  }, [step, loading, pageOffset, cities.length, districts.length, branches.length, hospitals.length, doctors.length, slots.length]);
 
   const renderStepContent = () => {
     if (loading) {
@@ -856,24 +1202,61 @@ export default function AppointmentScreen({ setScreen, accessibilitySettings }) 
         return (
           <View style={{ flex: 1 }}>
             <Text style={[styles.stepTitle, { color: colors.text, fontSize: fontSizes.large }]}>
-              Randevu Saati Seçin
+              Randevu Tarihi Seçin
             </Text>
-            {slots.length === 0 ? (
+            {getUniqueDates().length === 0 ? (
               <View style={styles.emptyContainer}>
                 <MaterialIcons name="event-busy" size={48} color={colors.muted} />
                 <Text style={[styles.emptyText, { color: colors.muted, fontSize: fontSizes.medium }]}>
-                  En yakın uygun slot bulunmamaktadır.
+                  Müsait randevu tarihi bulunmamaktadır.
                 </Text>
               </View>
             ) : (
               <FlatList
-                data={slots}
+                data={getUniqueDates()}
+                keyExtractor={(item) => item}
+                renderItem={({ item, index }) => {
+                  const label = formatTurkishDateWithRelative(item);
+                  return (
+                    <TouchableOpacity
+                      style={[styles.itemRow, { backgroundColor: colors.card, borderColor: colors.border }]}
+                      onPress={() => handleDateSelect(item)}
+                      accessibilityRole="button"
+                      accessibilityLabel={`${index + 1} numara, ${label}`}
+                    >
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                        <MaterialIcons name="event" size={24} color={colors.primary} />
+                        <Text style={[styles.itemText, { color: colors.text, fontSize: fontSizes.medium }]}>
+                          {label}
+                        </Text>
+                      </View>
+                      <MaterialIcons name="chevron-right" size={24} color={colors.muted} />
+                    </TouchableOpacity>
+                  );
+                }}
+              />
+            )}
+          </View>
+        );
+      case 7:
+        return (
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.stepTitle, { color: colors.text, fontSize: fontSizes.large }]}>
+              Randevu Saati Seçin
+            </Text>
+            {getFilteredSlotsForSelectedDate().length === 0 ? (
+              <View style={styles.emptyContainer}>
+                <MaterialIcons name="schedule" size={48} color={colors.muted} />
+                <Text style={[styles.emptyText, { color: colors.muted, fontSize: fontSizes.medium }]}>
+                  Seçilen tarih için uygun randevu saati bulunmamaktadır.
+                </Text>
+              </View>
+            ) : (
+              <FlatList
+                data={getFilteredSlotsForSelectedDate()}
                 keyExtractor={(item) => item.id.toString()}
-                renderItem={({ item }) => {
-                  const dayStr = item.date.split('-')[2];
-                  const months = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
-                  const monthStr = months[parseInt(item.date.split('-')[1]) - 1];
-                  const label = `${item.doctor_name}, ${dayStr} ${monthStr} saat ${item.time}`;
+                renderItem={({ item, index }) => {
+                  const label = `${index + 1} numara, saat ${item.time}`;
                   return (
                     <TouchableOpacity
                       style={[styles.slotCard, { backgroundColor: colors.card, borderColor: colors.border }]}
@@ -892,7 +1275,7 @@ export default function AppointmentScreen({ setScreen, accessibilitySettings }) 
                           {item.doctor_name}
                         </Text>
                         <Text style={[styles.slotDate, { color: colors.muted, fontSize: fontSizes.small }]}>
-                          {dayStr} {monthStr} {item.date.split('-')[0]}
+                          {formatTurkishDateWithRelative(item.date)}
                         </Text>
                       </View>
                       <MaterialIcons name="chevron-right" size={24} color={colors.muted} />
@@ -903,7 +1286,7 @@ export default function AppointmentScreen({ setScreen, accessibilitySettings }) 
             )}
           </View>
         );
-      case 7:
+      case 8:
         return (
           <View style={[styles.card, { backgroundColor: colors.card, borderRadius: radius.card }]}>
             <Text style={[styles.summaryTitle, { color: colors.text, fontSize: fontSizes.large }]}>
@@ -942,16 +1325,17 @@ export default function AppointmentScreen({ setScreen, accessibilitySettings }) 
             <View style={styles.summaryRow}>
               <Text style={[styles.summaryLabel, { color: colors.muted, fontSize: fontSizes.medium }]}>Tarih & Saat:</Text>
               <Text style={[styles.summaryValue, { color: colors.primary, fontSize: fontSizes.medium, fontWeight: 'bold' }]}>
-                {selectedSlot?.date.split('-')[2]}.{selectedSlot?.date.split('-')[1]}.{selectedSlot?.date.split('-')[0]} - {selectedSlot?.time}
+                {formatTurkishDate(selectedSlot?.date)} - {selectedSlot?.time}
               </Text>
             </View>
 
             <AccessibleButton
-              title="Randevuyu Onayla ve Al"
+              title={isBooking ? "İşleniyor..." : "Randevuyu Onayla ve Al"}
               onPress={handleConfirmBooking}
               style={{ marginTop: 24 }}
-              accessibilityLabel="Randevuyu onayla ve al"
+              accessibilityLabel={isBooking ? "Randevunuz işleniyor, lütfen bekleyin" : "Randevuyu onayla ve al"}
               accessibilityHint="Randevuyu oluşturmak ve onaylamak için çift tıklayın"
+              disabled={isBooking}
             />
           </View>
         );
@@ -979,7 +1363,6 @@ export default function AppointmentScreen({ setScreen, accessibilitySettings }) 
           </TouchableOpacity>
         </View>
 
-        {/* Selected Items summary top panel */}
         {step > 1 && (
           <View style={[styles.topSummaryBar, { backgroundColor: colors.card, borderColor: colors.border }]}>
             <Text style={{ color: colors.muted, fontSize: fontSizes.small }}>
@@ -989,6 +1372,8 @@ export default function AppointmentScreen({ setScreen, accessibilitySettings }) 
                 selectedBranch?.name,
                 selectedHospital?.name,
                 selectedDoctor ? selectedDoctor.full_name : (step > 5 ? 'Fark Etmez' : null),
+                selectedDate ? formatTurkishDate(selectedDate) : null,
+                selectedSlot ? selectedSlot.time : null
               ].filter(Boolean).join(' ➔ ')}
             </Text>
           </View>
@@ -997,6 +1382,14 @@ export default function AppointmentScreen({ setScreen, accessibilitySettings }) 
         <View style={{ flex: 1 }}>{renderStepContent()}</View>
       </View>
     </SafeAreaView>
+  );
+}
+
+export default function AppointmentScreen(props) {
+  return (
+    <AppointmentScreenErrorBoundary>
+      <AppointmentScreenContent {...props} />
+    </AppointmentScreenErrorBoundary>
   );
 }
 

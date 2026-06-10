@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, View, ActivityIndicator } from 'react-native';
+import { StyleSheet, View, ActivityIndicator, Alert, TouchableOpacity, Text } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import LoginScreen from './src/screens/LoginScreen';
 import RegisterScreen from './src/screens/RegisterScreen';
+import ForgotPasswordScreen from './src/screens/ForgotPasswordScreen';
 import HomeScreen from './src/screens/HomeScreen';
 import MyAppointmentsScreen from './src/screens/MyAppointmentsScreen';
 import ProfileScreen from './src/screens/ProfileScreen';
@@ -13,10 +14,12 @@ import VoiceCommandAssistantScreen from './src/screens/VoiceCommandAssistantScre
 import { colors } from './src/styles/theme';
 import { Platform } from 'react-native';
 import { voiceService } from './src/utils/speech';
-import { detectRecognitionMode, requestMicrophonePermission } from './src/utils/voiceRecognition';
+import { detectRecognitionMode, requestMicrophonePermission, checkMicrophonePermission } from './src/utils/voiceRecognition';
+import { MaterialIcons } from '@expo/vector-icons';
 
 export default function App() {
   const [screen, setScreen] = useState(null); // null denotes initial load check
+  const [isVoiceEnabled, setIsVoiceEnabled] = useState(voiceService.voiceEnabled);
   const [accessibilitySettings, setAccessibilitySettingsState] = useState({
     largeText: false,
     highContrast: false,
@@ -54,67 +57,24 @@ export default function App() {
     initializeApp();
   }, []);
 
-  // Global voice command controller
+  // Sync local state with global VoiceService voiceEnabled
   useEffect(() => {
-    if (screen === 'login' || screen === 'register' || screen === null) {
-      voiceService.cleanup();
-      return;
-    }
-
-    // Let VoiceCommandAssistantScreen handle its own step-by-step logic
-    if (screen === 'voiceCommandAssistant' || screen === 'appointment') {
-      return;
-    }
-
-    // Request permissions on native platforms
-    if (Platform.OS !== 'web') {
-      requestMicrophonePermission().then((hasPermission) => {
-        console.log('[App] Microphone permission:', hasPermission);
+    voiceService.onVoiceEnabledChange = (enabled) => {
+      setIsVoiceEnabled(enabled);
+    };
+    
+    // Check permissions on native platforms without prompting every time
+    if (Platform.OS !== 'web' && screen !== 'login' && screen !== 'register' && screen !== 'forgotPassword' && screen !== null) {
+      checkMicrophonePermission().then((hasPermission) => {
+        console.log('[App] Current Microphone permission:', hasPermission);
+        if (!hasPermission && isVoiceEnabled) {
+          console.log('[App] Microphone denied but voice is enabled. Disabling voice.');
+          voiceService.setVoiceEnabled(false);
+        }
       });
     }
 
-    console.log('[App] Initializing global voice recognition listener on screen:', screen);
-
-    voiceService.startListening(
-      async (text) => {
-        const norm = text.toLowerCase().trim();
-        console.log('[Global Voice Command Received]:', text);
-
-        if (norm.includes('randevu al') || norm.includes('hastane randevusu') || norm.includes('randevu almak istiyorum')) {
-          setScreen('appointment');
-          voiceService.speak('Hastane randevusu ekranına yönlendiriliyorsunuz.', null, true);
-        } else if (norm.includes('randevularım') || norm.includes('randevular')) {
-          setScreen('myAppointments');
-          voiceService.speak('Randevularım ekranına yönlendiriliyorsunuz.', null, true);
-        } else if (norm.includes('aile hekimi')) {
-          setScreen('familyPhysician');
-          voiceService.speak('Aile hekimi ekranına yönlendiriliyorsunuz.', null, true);
-        } else if (norm.includes('profil') || norm.includes('ayarlar')) {
-          setScreen('profile');
-          voiceService.speak('Profil ve ayarlar ekranına yönlendiriliyorsunuz.', null, true);
-        } else if (norm.includes('çıkış') || norm.includes('çıkış yap')) {
-          try {
-            voiceService.cleanup();
-            await AsyncStorage.removeItem('token');
-            await AsyncStorage.removeItem('role');
-            await AsyncStorage.removeItem('user');
-            setScreen('login');
-            voiceService.speak('Oturum kapatıldı.', null, true);
-          } catch (e) {
-            console.error('[Global Logout Error]', e);
-          }
-        } else if (norm.includes('geri') || norm.includes('geri dön') || norm.includes('geri git') || norm.includes('ana sayfa') || norm.includes('iptal')) {
-          setScreen('home');
-          voiceService.speak('Ana sayfaya dönülüyor.', null, true);
-        }
-      },
-      () => {},
-      (err) => console.log('[Global STT Error]', err),
-      () => console.log('[Global STT Started]')
-    );
-
     return () => {
-      // Cleanup global listener on screen change or unmount
       voiceService.cleanup();
     };
   }, [screen]);
@@ -150,6 +110,12 @@ export default function App() {
       )}
       {screen === 'register' && (
         <RegisterScreen
+          setScreen={setScreen}
+          accessibilitySettings={accessibilitySettings}
+        />
+      )}
+      {screen === 'forgotPassword' && (
+        <ForgotPasswordScreen
           setScreen={setScreen}
           accessibilitySettings={accessibilitySettings}
         />
@@ -191,6 +157,33 @@ export default function App() {
           accessibilitySettings={accessibilitySettings}
         />
       )}
+
+      {!isVoiceEnabled && screen !== 'login' && screen !== 'register' && screen !== 'forgotPassword' && screen !== null && (
+        <View style={styles.floatingButtonContainer} pointerEvents="box-none">
+          <TouchableOpacity
+            style={styles.floatingButton}
+            accessibilityRole="button"
+            accessibilityLabel="Sesli Asistanı Aç"
+            accessibilityHint="Kapalı olan sesli asistan mikrofonunu yeniden aktif hale getirir"
+            onPress={async () => {
+              if (Platform.OS !== 'web') {
+                const granted = await requestMicrophonePermission();
+                if (granted) {
+                  voiceService.setVoiceEnabled(true);
+                } else {
+                  Alert.alert('İzin Reddedildi', 'Mikrofon erişimi kapalı. Ayarlardan etkinleştirebilirsiniz.');
+                }
+              } else {
+                voiceService.setVoiceEnabled(true);
+              }
+            }}
+          >
+            <MaterialIcons name="mic" size={32} color="#ffffff" />
+            <Text style={styles.floatingButtonText}>Sesli Asistanı Aç</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
       <StatusBar style="auto" />
     </View>
   );
@@ -206,5 +199,32 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: '#ffffff',
+  },
+  floatingButtonContainer: {
+    position: 'absolute',
+    top: 40,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    zIndex: 999,
+  },
+  floatingButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#e53935', // Red theme for prominent visibility
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 30,
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 5,
+  },
+  floatingButtonText: {
+    color: '#ffffff',
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginLeft: 8,
   },
 });

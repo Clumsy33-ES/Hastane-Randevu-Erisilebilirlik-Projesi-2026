@@ -19,6 +19,10 @@ export default function MyAppointmentsScreen({ setScreen, accessibilitySettings 
   const [tab, setTab] = useState('active'); // 'active' | 'past'
   const [appointments, setAppointments] = useState([]);
   const [loading, setLoading] = useState(false);
+  
+  // Voice states
+  const [voiceStep, setVoiceStep] = useState('idle'); // 'idle' | 'cancel_ask' | 'cancel_confirm'
+  const [selectedCancelItem, setSelectedCancelItem] = useState(null);
 
   const theme = getTheme(accessibilitySettings);
   const { colors, fontSizes } = theme;
@@ -44,17 +48,134 @@ export default function MyAppointmentsScreen({ setScreen, accessibilitySettings 
   useEffect(() => {
     voiceService.setScreen('myAppointments');
     if (accessibilitySettings?.voiceGuide) {
-      voiceService.speak('Randevularınızı görüntüleyebilirsiniz.');
+      voiceService.speak('Randevularım ekranındasınız. Randevularınızı okutmak için "randevularımı oku" diyebilirsiniz.');
     }
+    
     return () => {
-      voiceService.cleanup();
+      voiceService.stopListening();
     };
   }, []);
 
-  const handleCancelAppointment = (item, detailText) => {
+  // Voice listener core
+  useEffect(() => {
+    const startListener = () => {
+      voiceService.startListening(
+        (text) => handleVoiceInput(text),
+        () => {},
+        (err) => console.log('[Appointments STT Error]', err),
+        () => console.log('[Appointments STT Started]')
+      );
+    };
+
+    if (!loading) {
+      startListener();
+    }
+  }, [loading, tab, appointments, voiceStep, selectedCancelItem]);
+
+  const normalizeText = (text) => {
+    if (!text) return '';
+    return text.toLowerCase().trim()
+      .replace(/ı/g, 'i').replace(/ğ/g, 'g').replace(/ü/g, 'u')
+      .replace(/ş/g, 's').replace(/ö/g, 'o').replace(/ç/g, 'c')
+      .replace(/[^a-z0-9\s]/g, '');
+  };
+
+  const handleVoiceInput = async (transcript) => {
+    if (!transcript || transcript.trim() === '') {
+      return;
+    }
+
+    if (voiceService.handleGlobalCommand(transcript, setScreen)) {
+      return;
+    }
+
+    const norm = normalizeText(transcript);
+
+    if (voiceStep === 'idle') {
+      if (norm.includes('aktif randevular')) {
+        setTab('active');
+        voiceService.speak('Aktif randevular listeleniyor.', null, true);
+        return;
+      }
+      if (norm.includes('gecmis randevular')) {
+        setTab('past');
+        voiceService.speak('Geçmiş randevular listeleniyor.', null, true);
+        return;
+      }
+      if (norm.includes('randevularimi oku') || norm.includes('randevulari oku') || norm.includes('oku')) {
+        if (appointments.length === 0) {
+          voiceService.speak('Listede randevunuz bulunmuyor.', null, true);
+          return;
+        }
+        let msg = '';
+        appointments.forEach((a, idx) => {
+          msg += `${idx + 1}. seçenek: ${a.hospital_name || 'Bilinmeyen Kurum'}, ${a.branch_name || 'Aile Hekimliği'}, ${formatDateTurkish(a.date)} saat ${a.time}. `;
+        });
+        voiceService.speak(msg, null, true);
+        return;
+      }
+      if (norm.includes('iptal et')) {
+        if (tab !== 'active' || appointments.length === 0) {
+          voiceService.speak('İptal edilebilecek aktif randevunuz bulunmuyor.', null, true);
+          return;
+        }
+        setVoiceStep('cancel_ask');
+        voiceService.speak('Kaldırmak istediğiniz randevunun numarasını söyleyin. Örneğin birinci, ikinci.', null, true);
+        return;
+      }
+    } else if (voiceStep === 'cancel_ask') {
+      if (norm.includes('iptal') || norm.includes('geri')) {
+        setVoiceStep('idle');
+        voiceService.speak('İptal işlemi durduruldu.', null, true);
+        return;
+      }
+      const indexWords = {
+        'bir': 0, 'birinci': 0, '1': 0, 'ilk': 0,
+        'iki': 1, 'ikinci': 1, '2': 1,
+        'uc': 2, 'ucuncu': 2, '3': 2,
+        'dort': 3, 'dorduncu': 3, '4': 3,
+        'bes': 4, 'besinci': 4, '5': 4,
+      };
+      
+      let matchedIndex = -1;
+      const tokens = norm.split(/\s+/);
+      for (const word in indexWords) {
+        if (tokens.includes(word) || norm === word) {
+          matchedIndex = indexWords[word];
+          break;
+        }
+      }
+
+      if (matchedIndex !== -1 && matchedIndex < appointments.length) {
+        const selected = appointments[matchedIndex];
+        setSelectedCancelItem(selected);
+        setVoiceStep('cancel_confirm');
+        voiceService.speak(`${matchedIndex + 1} numaralı randevuyu iptal etmek istiyor musunuz? Evet veya hayır deyin.`, null, true);
+      } else {
+        voiceService.speak('Geçersiz numara. Lütfen iptal etmek istediğiniz randevunun numarasını söyleyin.', null, true);
+      }
+    } else if (voiceStep === 'cancel_confirm') {
+      const confirmCommands = ['evet', 'onayliyorum', 'onayla', 'kabul'];
+      const isConfirm = confirmCommands.some(cmd => norm === cmd || norm.includes(cmd));
+      const rejectCommands = ['hayir', 'vazgec', 'iptal'];
+      const isReject = rejectCommands.some(cmd => norm === cmd || norm.includes(cmd));
+
+      if (isConfirm && selectedCancelItem) {
+        setVoiceStep('idle');
+        handleCancelAppointment(selectedCancelItem, "Sesli komutla iptal ediliyor", true);
+      } else if (isReject) {
+        setVoiceStep('idle');
+        setSelectedCancelItem(null);
+        voiceService.speak('İptal işlemi durduruldu.', null, true);
+      } else {
+        voiceService.speak('Lütfen evet veya hayır deyin.', null, true);
+      }
+    }
+  };
+
+  const handleCancelAppointment = (item, detailText, fromVoice = false) => {
     const performCancel = async () => {
       try {
-        // Differentiate endpoint based on appointment type
         const isFp = item.appointment_type === 'family_physician';
         const endpoint = isFp
           ? `/family-physician/appointments/${item.id}`
@@ -64,29 +185,26 @@ export default function MyAppointmentsScreen({ setScreen, accessibilitySettings 
         
         const successMsg = 'Randevu iptal edildi.';
         Alert.alert('Başarılı', successMsg);
-        if (accessibilitySettings?.voiceGuide) {
-          voiceService.speak(successMsg);
-        }
+        voiceService.speak(successMsg, null, true);
         fetchAppointments(tab);
       } catch (error) {
         console.error('[Cancel Appointment Error]', error);
         const errorMsg = error.response?.data?.detail || 'Randevu iptal edilemedi.';
         Alert.alert('Hata', errorMsg);
+        voiceService.speak('Randevu iptal edilemedi.', null, true);
       }
     };
 
-    const confirmMessage = 'Randevuyu iptal etmek istiyor musunuz?';
-    if (Platform.OS === 'web') {
-      const confirmed = window.confirm(`${confirmMessage}\n\n${detailText}`);
-      if (confirmed) {
-        performCancel();
-      }
-    } else {
-      Alert.alert('Randevu İptali', confirmMessage, [
-        { text: 'Vazgeç', style: 'cancel' },
-        { text: 'Evet, İptal Et', style: 'destructive', onPress: performCancel },
-      ]);
+    if (fromVoice) {
+      performCancel();
+      return;
     }
+
+    const confirmMessage = 'Randevuyu iptal etmek istiyor musunuz?';
+    Alert.alert('Randevu İptali', confirmMessage, [
+      { text: 'Vazgeç', style: 'cancel' },
+      { text: 'Evet, İptal Et', style: 'destructive', onPress: performCancel },
+    ]);
   };
 
   const handleSpeechGuide = () => {

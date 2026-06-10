@@ -27,7 +27,7 @@ export default function LoginScreen({ setScreen, accessibilitySettings }) {
   useEffect(() => {
     voiceService.setScreen('login');
     if (accessibilitySettings?.voiceGuide) {
-      voiceService.speak('Giriş ekranındasınız.');
+      voiceService.speak('Giriş ekranındasınız. TC kimlik numaranızı girmek için ilk alana, şifrenizi girmek için ikinci alana dokunabilirsiniz. TalkBack veya VoiceOver kullanıyorsanız alanlar sesli okunacaktır.');
     }
     return () => {
       voiceService.cleanup();
@@ -112,8 +112,8 @@ export default function LoginScreen({ setScreen, accessibilitySettings }) {
                 placeholderTextColor={colors.muted}
                 keyboardType="numeric"
                 maxLength={11}
-                accessibilityLabel="TC kimlik numarası giriş alanı"
-                accessibilityHint="TC kimlik numaranızı yazmak için iki kez dokunun"
+                accessibilityLabel="TC Kimlik Numarası"
+                accessibilityHint="On bir haneli TC kimlik numaranızı girin"
               />
             </View>
 
@@ -128,9 +128,9 @@ export default function LoginScreen({ setScreen, accessibilitySettings }) {
                 onChangeText={setPassword}
                 placeholder="Şifreniz"
                 placeholderTextColor={colors.muted}
-                secureTextEntry
-                accessibilityLabel="Şifre giriş alanı"
-                accessibilityHint="Şifrenizi yazmak için iki kez dokunun"
+                secureTextEntry={true}
+                accessibilityLabel="Şifre"
+                accessibilityHint="Şifrenizi girin"
               />
             </View>
 
@@ -139,8 +139,8 @@ export default function LoginScreen({ setScreen, accessibilitySettings }) {
               title="Giriş Yap"
               onPress={handleLogin}
               loading={loading}
-              accessibilityLabel="Giriş yap"
-              accessibilityHint="Giriş yapmak için çift tıklayın"
+              accessibilityLabel="Giriş Yap"
+              accessibilityHint="Bilgileriniz doğruysa ana sayfaya geçer"
               style={[styles.loginBtn, { backgroundColor: colors.primary }]}
               textStyle={{ fontSize: fontSizes.large }}
             />
@@ -154,6 +154,27 @@ export default function LoginScreen({ setScreen, accessibilitySettings }) {
               style={[styles.registerBtn, { borderColor: colors.border }]}
               textStyle={[styles.registerBtnText, { color: colors.primary, fontSize: fontSizes.large }]}
             />
+
+            <AccessibleButton
+              title="Şifremi Unuttum?"
+              onPress={() => setScreen('forgotPassword')}
+              accessibilityLabel="Şifremi unuttum"
+              accessibilityHint="Şifrenizi sıfırlamak için çift tıklayın"
+              style={[styles.forgotBtn, { borderColor: 'transparent', backgroundColor: 'transparent' }]}
+              textStyle={[styles.forgotBtnText, { color: colors.primary, fontSize: fontSizes.medium }]}
+            />
+
+            {/* Biometric Login (Placeholder) */}
+            {/* MİMARİ NOT: İlerleyen sürümde yüz tanıma/parmak izi ile biyometrik giriş desteği eklenecektir. */}
+            <View style={{ marginTop: 24 }}>
+              <AccessibleButton
+                title="Biyometrik Giriş — Yakında"
+                onPress={() => {}}
+                accessibilityLabel="Biyometrik giriş yakında eklenecektir"
+                style={[{ backgroundColor: colors.muted, opacity: 0.6 }]}
+                textStyle={{ fontSize: fontSizes.medium }}
+              />
+            </View>
           </View>
 
           {/* Guide Alert/Tip */}
@@ -237,6 +258,15 @@ const styles = StyleSheet.create({
   },
   registerBtnText: {
     fontWeight: 'bold',
+  },
+  forgotBtn: {
+    marginTop: 8,
+    paddingVertical: 8,
+    elevation: 0,
+    shadowOpacity: 0,
+  },
+  forgotBtnText: {
+    textDecorationLine: 'underline',
   },
   guideContainer: {
     marginTop: 20,

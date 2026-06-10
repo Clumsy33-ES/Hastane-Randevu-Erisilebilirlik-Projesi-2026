@@ -56,6 +56,58 @@ export default function VoiceCommandAssistantScreen({ setScreen, accessibilitySe
   const [selectedHospital, setSelectedHospital] = useState(null);
   const [selectedDoctor, setSelectedDoctor] = useState(null); // null represents "Fark Etmez"
   const [selectedSlot, setSelectedSlot] = useState(null);
+  const [selectedDate, setSelectedDate] = useState(null);
+
+  // Helper functions for Date Filtering
+  const getFilteredSlots = (allSlots) => {
+    if (!allSlots) return [];
+    const now = new Date();
+    const todayStr = now.toISOString().split('T')[0];
+    const currentHour = now.getHours();
+    const currentMin = now.getMinutes();
+
+    return allSlots.filter(slot => {
+      if (!slot.date) return false;
+      if (slot.date < todayStr) return false;
+      if (slot.date === todayStr) {
+        if (!slot.time) return false;
+        const [slotHour, slotMin] = slot.time.split(':').map(Number);
+        if (slotHour < currentHour || (slotHour === currentHour && slotMin <= currentMin)) {
+          return false;
+        }
+      }
+      return true;
+    });
+  };
+
+  const getUniqueDates = () => {
+    const filtered = getFilteredSlots(slots);
+    const dates = [...new Set(filtered.map(s => s.date))];
+    dates.sort();
+    return dates;
+  };
+
+  const getFilteredSlotsForSelectedDate = () => {
+    const filtered = getFilteredSlots(slots);
+    return filtered.filter(s => s.date === selectedDate);
+  };
+
+  const formatTurkishDateWithRelative = (dateStr) => {
+    if (!dateStr) return '';
+    const now = new Date();
+    const todayStr = now.toISOString().split('T')[0];
+    const tomorrow = new Date(now);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const tomorrowStr = tomorrow.toISOString().split('T')[0];
+
+    const formatted = formatDateTurkish(dateStr);
+    if (dateStr === todayStr) {
+      return `bugün, ${formatted}`;
+    } else if (dateStr === tomorrowStr) {
+      return `yarın, ${formatted}`;
+    }
+    return formatted;
+  };
 
   // Pulse animation ref
   const pulseAnim = useRef(new Animated.Value(1)).current;
@@ -124,29 +176,53 @@ export default function VoiceCommandAssistantScreen({ setScreen, accessibilitySe
       case 'askDoctor':
         speakPrompt = 'Belirli bir doktor seçmek istiyorsanız adını söyleyin. Doktor fark etmez demek için "fark etmez" deyin.';
         break;
-      case 'askSlot':
-        if (slots.length === 0) {
-          speakPrompt = 'Üzgünüm, seçtiğiniz doktor ve hastanede uygun randevu saati bulunamadı. Başka bir hekim seçmek için "geri" diyebilirsiniz.';
+      case 'askDate':
+        if (getUniqueDates().length === 0) {
+          speakPrompt = 'Üzgünüm, seçtiğiniz doktor ve hastanede uygun randevu tarihi bulunamadı. Başka bir hekim seçmek için "geri" diyebilirsiniz.';
         } else {
-          speakPrompt = 'Müsait randevu saatleri bulundu. Lütfen seçenek numaralarından birini söyleyin. Örneğin, birinci saat için "birinci", ikinci saat için "ikinci" diyebilirsiniz. Seçenekler şunlardır: ';
-          slots.slice(0, 5).forEach((s, idx) => {
-            speakPrompt += `${idx + 1}. seçenek: ${s.doctor_name}, ${formatDateTurkish(s.date)} saat ${s.time}. `;
+          speakPrompt = 'Müsait tarihler bulundu. Lütfen seçenek numaralarından birini söyleyin. Seçenekler şunlardır: ';
+          getUniqueDates().slice(0, 5).forEach((d, idx) => {
+            speakPrompt += `${idx + 1}. seçenek: ${formatTurkishDateWithRelative(d)}. `;
           });
         }
         break;
+      case 'askSlot': {
+        const validSlots = getFilteredSlotsForSelectedDate();
+        if (validSlots.length === 0) {
+          speakPrompt = 'Seçtiğiniz tarihte uygun saat bulunamadı. Başka bir tarih seçmek için "geri" diyebilirsiniz.';
+        } else {
+          speakPrompt = `${formatTurkishDateWithRelative(selectedDate)} için uygun saatler: `;
+          validSlots.slice(0, 5).forEach((s, idx) => {
+            speakPrompt += `${idx + 1}. seçenek: saat ${s.time}. `;
+          });
+        }
+        break;
+      }
       case 'confirm':
         speakPrompt = `${selectedBranch?.name} branşında, ${selectedHospital?.name} hastanesinde, ${selectedSlot?.doctor_name} isimli hekimden, ${formatDateTurkish(selectedSlot?.date)} günü saat ${selectedSlot?.time} için randevu almak istiyorsunuz. Onaylıyor musunuz? Evet veya hayır deyin.`;
         break;
-      case 'askFpSlot':
-        if (slots.length === 0) {
-          speakPrompt = 'Üzgünüm, aile hekiminiz için uygun randevu saati bulunamadı. Daha sonra tekrar denemek için "ana sayfa" diyebilirsiniz.';
+      case 'askFpDate':
+        if (getUniqueDates().length === 0) {
+          speakPrompt = 'Üzgünüm, aile hekiminiz için uygun randevu tarihi bulunamadı. Daha sonra tekrar denemek için "ana sayfa" diyebilirsiniz.';
         } else {
-          speakPrompt = 'Aile hekiminiz için uygun randevu saatleri bulundu. Lütfen seçenek numaralarından birini söyleyin. Örneğin, birinci saat için "birinci" diyebilirsiniz. Seçenekler: ';
-          slots.slice(0, 5).forEach((s, idx) => {
-            speakPrompt += `${idx + 1}. seçenek: ${formatDateTurkish(s.date)} saat ${s.time}. `;
+          speakPrompt = 'Aile hekiminiz için uygun tarihler bulundu. Lütfen seçenek numaralarından birini söyleyin. Seçenekler: ';
+          getUniqueDates().slice(0, 5).forEach((d, idx) => {
+            speakPrompt += `${idx + 1}. seçenek: ${formatTurkishDateWithRelative(d)}. `;
           });
         }
         break;
+      case 'askFpSlot': {
+        const fpSlots = getFilteredSlotsForSelectedDate();
+        if (fpSlots.length === 0) {
+          speakPrompt = 'Seçtiğiniz tarihte aile hekiminiz için uygun saat bulunamadı. Lütfen "geri" deyin.';
+        } else {
+          speakPrompt = `${formatTurkishDateWithRelative(selectedDate)} için aile hekiminize uygun saatler: `;
+          fpSlots.slice(0, 5).forEach((s, idx) => {
+            speakPrompt += `${idx + 1}. seçenek: saat ${s.time}. `;
+          });
+        }
+        break;
+      }
       case 'confirmFp':
         speakPrompt = `Aile hekiminiz ${fpInfo?.doctor_name} için, ${formatDateTurkish(selectedSlot?.date)} günü saat ${selectedSlot?.time} randevusunu onaylıyor musunuz? Evet veya hayır deyin.`;
         break;
@@ -226,13 +302,14 @@ export default function VoiceCommandAssistantScreen({ setScreen, accessibilitySe
   };
 
   const handleGoBack = async () => {
-    voiceService.cleanup();
+    voiceService.stopListening();
     
     if (stepHistory.length > 0) {
       const prevStep = stepHistory[stepHistory.length - 1];
       setStepHistory((prev) => prev.slice(0, -1));
       setCurrentStep(prevStep);
     } else {
+      voiceService.cleanup();
       setScreen('home');
     }
   };
@@ -315,6 +392,16 @@ export default function VoiceCommandAssistantScreen({ setScreen, accessibilitySe
 
   // Main voice input state machine routing
   const handleVoiceInput = async (spoken) => {
+    if (!spoken || spoken.trim() === '') {
+      console.log("[Voice Assistant] Empty transcript, ignoring.");
+      startVoiceRecognition();
+      return;
+    }
+
+    if (voiceService.handleGlobalCommand(spoken, setScreen)) {
+      return;
+    }
+
     const norm = normalizeText(spoken);
     
     // Global controls
@@ -351,7 +438,7 @@ export default function VoiceCommandAssistantScreen({ setScreen, accessibilitySe
             if (res.data.has_family_physician) {
                const slotRes = await apiClient.get('/family-physician/slots');
               setSlots(slotRes.data || []);
-              navigateToStep('askFpSlot');
+              navigateToStep('askFpDate');
             } else {
               const msg = 'Kayıtlı aile hekiminiz bulunmamaktadır. Lütfen profil sayfasından aile hekimi atayın.';
               speakAndListen(msg);
@@ -463,7 +550,7 @@ export default function VoiceCommandAssistantScreen({ setScreen, accessibilitySe
           try {
             const res = await apiClient.get(`/appointments/slots?hospital_id=${selectedHospital.id}&branch_id=${selectedBranch.id}`);
             setSlots(res.data || []);
-            navigateToStep('askSlot');
+            navigateToStep('askDate');
           } catch (e) {
             console.error(e);
             speakAndListen('Randevu saatleri alınamadı.');
@@ -478,7 +565,7 @@ export default function VoiceCommandAssistantScreen({ setScreen, accessibilitySe
             try {
               const res = await apiClient.get(`/appointments/slots?hospital_id=${selectedHospital.id}&branch_id=${selectedBranch.id}&doctor_id=${matchedDoc.id}`);
               setSlots(res.data || []);
-              navigateToStep('askSlot');
+              navigateToStep('askDate');
             } catch (e) {
               console.error(e);
               speakAndListen('Hekime ait uygun randevu saatleri yüklenemedi.');
@@ -491,15 +578,39 @@ export default function VoiceCommandAssistantScreen({ setScreen, accessibilitySe
         }
         break;
 
-      case 'askSlot':
-        const matchedSlot = matchSlotByVoice(spoken, slots);
+      case 'askDate':
+        {
+          const uniqueDates = getUniqueDates();
+          const words = norm.split(' ');
+          let matchedDate = null;
+          
+          // Index match
+          const indexWords = { 'bir': 0, 'birinci': 0, 'iki': 1, 'ikinci': 1, 'uc': 2, 'ucuncu': 2, 'dort': 3, 'dorduncu': 3, 'bes': 4, 'besinci': 4 };
+          for (const word of words) {
+            if (indexWords[word] !== undefined && indexWords[word] < uniqueDates.length) {
+              matchedDate = uniqueDates[indexWords[word]];
+              break;
+            }
+          }
+          if (matchedDate) {
+            setSelectedDate(matchedDate);
+            navigateToStep('askSlot');
+          } else {
+            speakAndListen('Tarih anlaşılamadı. Lütfen seçenek numaralarından birini söyleyin.');
+          }
+        }
+        break;
+
+      case 'askSlot': {
+        const matchedSlot = matchSlotByVoice(spoken, getFilteredSlotsForSelectedDate());
         if (matchedSlot) {
           setSelectedSlot(matchedSlot);
           navigateToStep('confirm');
         } else {
-          speakAndListen('Randevu saati anlaşılamadı. Lütfen listedeki seçenek numaralarından birini söyleyin.');
+          speakAndListen('Randevu saati anlaşılamadı. Lütfen seçenek numaralarından birini söyleyin.');
         }
         break;
+      }
 
       case 'confirm':
         if (norm.includes('evet') || norm.includes('onayliyorum') || norm.includes('randevuyu al')) {
@@ -511,8 +622,29 @@ export default function VoiceCommandAssistantScreen({ setScreen, accessibilitySe
         }
         break;
 
-      case 'askFpSlot':
-        const matchedFpSlot = matchSlotByVoice(spoken, slots);
+      case 'askFpDate':
+        {
+          const uniqueDates = getUniqueDates();
+          const words = norm.split(' ');
+          let matchedDate = null;
+          const indexWords = { 'bir': 0, 'birinci': 0, 'iki': 1, 'ikinci': 1, 'uc': 2, 'ucuncu': 2, 'dort': 3, 'dorduncu': 3, 'bes': 4, 'besinci': 4 };
+          for (const word of words) {
+            if (indexWords[word] !== undefined && indexWords[word] < uniqueDates.length) {
+              matchedDate = uniqueDates[indexWords[word]];
+              break;
+            }
+          }
+          if (matchedDate) {
+            setSelectedDate(matchedDate);
+            navigateToStep('askFpSlot');
+          } else {
+            speakAndListen('Tarih anlaşılamadı. Lütfen seçenek numaralarından birini söyleyin.');
+          }
+        }
+        break;
+
+      case 'askFpSlot': {
+        const matchedFpSlot = matchSlotByVoice(spoken, getFilteredSlotsForSelectedDate());
         if (matchedFpSlot) {
           setSelectedSlot(matchedFpSlot);
           navigateToStep('confirmFp');
@@ -520,6 +652,7 @@ export default function VoiceCommandAssistantScreen({ setScreen, accessibilitySe
           speakAndListen('Saat anlaşılamadı. Lütfen listedeki seçeneklerden birini söyleyin.');
         }
         break;
+      }
 
       case 'confirmFp':
         if (norm.includes('evet') || norm.includes('onayliyorum')) {
@@ -672,16 +805,25 @@ export default function VoiceCommandAssistantScreen({ setScreen, accessibilitySe
         onPressItem = (item) => handleVoiceInput(item.id === 'any' ? 'fark etmez' : item.full_name);
         break;
 
+      case 'askDate':
+      case 'askFpDate':
+        items = getUniqueDates();
+        keyExtractor = (item) => item;
+        labelExtractor = (item) => formatTurkishDateWithRelative(item);
+        onPressItem = (item, index) => {
+          handleVoiceInput(`${index + 1}. seçenek`);
+        };
+        break;
+
       case 'askSlot':
       case 'askFpSlot':
-        items = slots;
+        items = getFilteredSlotsForSelectedDate();
         keyExtractor = (item) => item.id.toString();
         labelExtractor = (item) => {
           const isFp = currentStep === 'askFpSlot';
-          return `${formatDateTurkish(item.date)} - Saat ${item.time} (${isFp ? 'Aile Hekimi' : item.doctor_name})`;
+          return `Saat ${item.time} (${isFp ? 'Aile Hekimi' : item.doctor_name})`;
         };
         onPressItem = (item, index) => {
-          // Emulate selection by choice index or details
           handleVoiceInput(`${index + 1}. seçenek`);
         };
         break;

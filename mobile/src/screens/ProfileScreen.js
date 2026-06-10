@@ -41,8 +41,22 @@ export default function ProfileScreen({
       voiceService.speak('Profil ve ayarlar ekranındasınız.');
     }
 
+    const startListener = () => {
+      voiceService.startListening(
+        (text) => {
+          console.log('[Profile Voice]', text);
+          voiceService.handleGlobalCommand(text, setScreen, handleLogout);
+        },
+        () => {},
+        (err) => console.log('[Profile Voice Error]', err),
+        () => console.log('[Profile Voice Started]')
+      );
+    };
+
+    startListener();
+
     return () => {
-      voiceService.cleanup();
+      voiceService.stopListening();
     };
   }, []);
 

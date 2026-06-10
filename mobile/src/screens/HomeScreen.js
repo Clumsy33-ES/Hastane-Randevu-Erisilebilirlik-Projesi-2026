@@ -17,6 +17,7 @@ import { detectRecognitionMode } from '../utils/voiceRecognition';
 
 export default function HomeScreen({ setScreen, accessibilitySettings }) {
   const [userRole, setUserRole] = useState('user');
+  const [userName, setUserName] = useState('');
   const theme = getTheme(accessibilitySettings);
   const { colors, fontSizes } = theme;
 
@@ -24,32 +25,77 @@ export default function HomeScreen({ setScreen, accessibilitySettings }) {
   useEffect(() => {
     voiceService.setScreen('home');
 
-    const fetchRole = async () => {
+    const fetchRoleAndGreet = async () => {
       try {
         const role = await AsyncStorage.getItem('role');
         if (role) {
           setUserRole(role);
         }
+        
+        const userStr = await AsyncStorage.getItem('user');
+        if (userStr) {
+          try {
+            const user = JSON.parse(userStr);
+            if (user.name) {
+              setUserName(user.name);
+            }
+          } catch (e) {
+            console.error('Failed to parse user', e);
+          }
+        }
+        
+        const hasGreeted = await AsyncStorage.getItem('hasGreeted');
+        if (!hasGreeted) {
+          setTimeout(() => {
+            voiceService.speak(
+              'Erişimli Randevu’ya hoş geldiniz. '
+              + 'Sesli komutları kapatmak için "ses kapat", '
+              + 'tekrar açmak için "ses aç" diyebilirsiniz. '
+              + 'Yardım için "yardım" diyebilirsiniz.'
+            );
+          }, 600);
+          await AsyncStorage.setItem('hasGreeted', 'true');
+        }
       } catch (e) {
-        console.error('[Home] Error reading role:', e);
+        console.error('[Home] Error reading async storage:', e);
       }
     };
-    fetchRole();
+    fetchRoleAndGreet();
 
-    const greetTimer = setTimeout(() => {
-      voiceService.speak(
-        'Erişimli Randevu uygulamasına hoş geldiniz. '
-        + 'Randevu almak için "Randevu Al" diyebilir, '
-        + 'Mevcut randevularınızı dinlemek için "Randevularım" diyebilir, '
-        + 'Aile hekimi işlemleri için "Aile Hekimi" diyebilir, '
-        + 'Profil bilgileri için "Profil" diyebilir '
-        + 'veya ekranı kaydırarak seçenekleri inceleyebilirsiniz.'
+    const startHomeListener = () => {
+      voiceService.startListening(
+        async (text) => {
+          const norm = text.toLowerCase().trim();
+          console.log('[HomeScreen Voice] Received:', text);
+          
+          if (voiceService.handleGlobalCommand(text, setScreen, handleLogout)) {
+            return;
+          }
+
+          if (norm.includes('randevu al') || norm.includes('hastane randevusu')) {
+            setScreen('appointment');
+            voiceService.speak('Hastane randevusu ekranına yönlendiriliyorsunuz.', null, true);
+          } else if (norm.includes('randevularım') || norm.includes('randevular')) {
+            setScreen('myAppointments');
+            voiceService.speak('Randevularım ekranına yönlendiriliyorsunuz.', null, true);
+          } else if (norm.includes('aile hekimi')) {
+            setScreen('familyPhysician');
+            voiceService.speak('Aile hekimi ekranına yönlendiriliyorsunuz.', null, true);
+          } else if (norm.includes('profil') || norm.includes('ayarlar')) {
+            setScreen('profile');
+            voiceService.speak('Profil ve ayarlar ekranına yönlendiriliyorsunuz.', null, true);
+          }
+        },
+        () => {},
+        (err) => console.log('[HomeScreen STT Error]', err),
+        () => console.log('[HomeScreen STT Started]')
       );
-    }, 600);
+    };
+
+    startHomeListener();
 
     return () => {
-      clearTimeout(greetTimer);
-      voiceService.cleanup();
+      voiceService.stopListening();
     };
   }, []);
 
@@ -74,6 +120,7 @@ export default function HomeScreen({ setScreen, accessibilitySettings }) {
       await AsyncStorage.removeItem('token');
       await AsyncStorage.removeItem('role');
       await AsyncStorage.removeItem('user');
+      await AsyncStorage.removeItem('hasGreeted');
       setScreen('login');
     } catch (e) {
       console.error('[Logout Error]', e);
@@ -132,7 +179,7 @@ export default function HomeScreen({ setScreen, accessibilitySettings }) {
             <View style={styles.logoAndText}>
               <Text style={[styles.headerLogo, { color: colors.primary }]}>Erişimli Randevu</Text>
               <Text style={[styles.welcomeText, { color: colors.text, fontSize: fontSizes.xxlarge }]}>
-                Hoş geldiniz
+                Hoş geldiniz{userName ? `,\nSayın ${userName}` : ''}
               </Text>
             </View>
             <TouchableOpacity
