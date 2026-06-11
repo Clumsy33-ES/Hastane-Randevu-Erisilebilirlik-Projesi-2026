@@ -13,98 +13,78 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { MaterialIcons } from '@expo/vector-icons';
 import { getTheme, radius } from '../styles/theme';
 import { voiceService } from '../utils/speech';
-import { detectRecognitionMode } from '../utils/voiceRecognition';
+import { isPresentationMode, MIN_TOUCH_TARGET } from '../utils/buildConfig';
 
 let hasSpokenHomeIntro = false;
 
-export default function HomeScreen({ setScreen, accessibilitySettings }) {
+export default function HomeScreen({ setScreen, accessibilitySettings, registerVoiceCallback }) {
   const [userRole, setUserRole] = useState('user');
   const [userName, setUserName] = useState('');
   const theme = getTheme(accessibilitySettings);
   const { colors, fontSizes } = theme;
 
-  const playIntro = (force = false) => {
-    voiceService.speak(
-      "Erişimli Randevu ana sayfasındasınız. Sesli Asistan, Hastane Randevusu, Aile Hekimi, Randevularım, Profil ve Ayarlar seçenekleri bulunmaktadır. Randevu almak için ‘randevu al’, randevularınızı görmek için ‘randevularım’, aile hekimi işlemleri için ‘aile hekimi’, yardım almak için ‘yardım’ diyebilirsiniz.",
-      null,
-      force // force speak overrides settings if user explicitly asked for help
-    );
+  const playIntro = (force = false, onDone = null) => {
+    const presentationText =
+      'Erişimli Randevu ana sayfasındasınız. '
+      + 'Birinci seçenek: Sesli Asistan — deneysel sesli komutlarla randevu. '
+      + 'İkinci seçenek: Hastane Randevusu — şehir, ilçe, branş ve saat seçerek randevu alın. '
+      + 'Üçüncü seçenek: Aile Hekimi. '
+      + 'Dördüncü seçenek: Randevularım. '
+      + 'Beşinci seçenek: Profil ve Ayarlar. '
+      + 'Devam etmek için istediğiniz menü kartına dokunun.';
+    const devText =
+      "Sağlık Ses ana sayfasındasınız. Sesli Asistan, Hastane Randevusu, Aile Hekimi, Randevularım, Profil ve Ayarlar seçenekleri bulunmaktadır. Randevu almak için ‘randevu al’, randevularınızı görmek için ‘randevularım’, aile hekimi işlemleri için ‘aile hekimi’, yardım almak için ‘yardım’ diyebilirsiniz.";
+
+    voiceService.speak(isPresentationMode() ? presentationText : devText, onDone, force);
   };
 
-  // ─── Auto voice greeting on mount ───────────────────────────────────────
+  // ─── Register voice callback with global STT in App.js ──────────────────
   useEffect(() => {
     voiceService.setScreen('home');
 
-    const fetchRoleAndGreet = async () => {
+    // Dev ortamında sesli komut handler; APK sunum modunda STT kapalı
+    if (registerVoiceCallback && !isPresentationMode()) {
+      registerVoiceCallback((text) => {
+        const norm = text.toLowerCase().trim();
+        console.log('[HomeScreen Voice] Received:', text);
+
+        if (norm.includes('yardım') || norm.includes('tekrar et') || norm.includes('seçenekleri söyle')) {
+          playIntro(true);
+        }
+      });
+    }
+
+    // TTS intro on first visit
+    const greetAndFetch = async () => {
       try {
         const role = await AsyncStorage.getItem('role');
-        if (role) {
-          setUserRole(role);
-        }
-        
+        if (role) setUserRole(role);
+
         const userStr = await AsyncStorage.getItem('user');
         if (userStr) {
           try {
             const user = JSON.parse(userStr);
-            if (user.name) {
-              setUserName(user.name);
-            }
+            if (user.name) setUserName(user.name);
           } catch (e) {
             console.error('Failed to parse user', e);
           }
         }
-        
+
         if (!hasSpokenHomeIntro) {
-          setTimeout(() => {
-            playIntro(true); // Force true so it reads even if mic is disabled
-          }, 600);
           hasSpokenHomeIntro = true;
+          // APK sunum: sadece TTS, mikrofon izni isteme
+          playIntro(true);
         }
       } catch (e) {
-        console.error('[Home] Error reading async storage:', e);
+        console.error('[Home] Error in greetAndFetch:', e);
       }
     };
-    fetchRoleAndGreet();
 
-    const startHomeListener = () => {
-      voiceService.startListening(
-        async (text) => {
-          const norm = text.toLowerCase().trim();
-          console.log('[HomeScreen Voice] Received:', text);
-          
-          if (norm.includes('yardım') || norm.includes('tekrar et') || norm.includes('seçenekleri söyle')) {
-            playIntro(true);
-            return;
-          }
-
-          if (voiceService.handleGlobalCommand(text, setScreen, handleLogout)) {
-            return;
-          }
-
-          if (norm.includes('randevu al') || norm.includes('hastane randevusu')) {
-            setScreen('appointment');
-            voiceService.speak('Hastane randevusu ekranına yönlendiriliyorsunuz.', null, true);
-          } else if (norm.includes('randevularım') || norm.includes('randevular')) {
-            setScreen('myAppointments');
-            voiceService.speak('Randevularım ekranına yönlendiriliyorsunuz.', null, true);
-          } else if (norm.includes('aile hekimi')) {
-            setScreen('familyPhysician');
-            voiceService.speak('Aile hekimi ekranına yönlendiriliyorsunuz.', null, true);
-          } else if (norm.includes('profil') || norm.includes('ayarlar')) {
-            setScreen('profile');
-            voiceService.speak('Profil ve ayarlar ekranına yönlendiriliyorsunuz.', null, true);
-          }
-        },
-        () => {},
-        (err) => console.log('[HomeScreen STT Error]', err),
-        () => console.log('[HomeScreen STT Started]')
-      );
-    };
-
-    startHomeListener();
+    greetAndFetch();
 
     return () => {
-      voiceService.stopListening();
+      // Unregister screen voice handler when leaving home
+      if (registerVoiceCallback) registerVoiceCallback(null);
     };
   }, []);
 
@@ -140,7 +120,9 @@ export default function HomeScreen({ setScreen, accessibilitySettings }) {
   const menuItems = [
     {
       title: 'Sesli Asistan',
-      subtitle: 'Randevu işlemlerini sesli komutlarla yapın.',
+      subtitle: isPresentationMode()
+        ? 'Deneysel: sesli komutlarla adım adım randevu alın.'
+        : 'Randevu işlemlerini sesli komutlarla yapın.',
       icon: 'mic',
       accessibilityLabel: 'Sesli asistan',
       accessibilityHint: 'Sesli komutlar ile adım adım randevu alma ekranına gider',
@@ -315,8 +297,8 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   speechBtn: {
-    width: 44,
-    height: 44,
+    width: MIN_TOUCH_TARGET,
+    height: MIN_TOUCH_TARGET,
     borderRadius: 22,
     justifyContent: 'center',
     alignItems: 'center',
@@ -361,7 +343,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.08,
     shadowRadius: 5,
     elevation: 3,
-    minHeight: 88, // Easy tap size
+    minHeight: MIN_TOUCH_TARGET + 32,
     borderWidth: 1,
   },
   iconContainer: {

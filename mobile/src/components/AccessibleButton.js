@@ -1,6 +1,9 @@
 import React from 'react';
 import { TouchableOpacity, Text, ActivityIndicator, StyleSheet } from 'react-native';
 import { colors, radius } from '../styles/theme';
+import { MIN_TOUCH_TARGET } from '../utils/buildConfig';
+
+const HIT_SLOP = { top: 8, bottom: 8, left: 8, right: 8 };
 
 export default function AccessibleButton({
   onPress,
@@ -18,6 +21,7 @@ export default function AccessibleButton({
     <TouchableOpacity
       onPress={onPress}
       disabled={isButtonDisabled}
+      hitSlop={HIT_SLOP}
       style={[
         styles.button,
         isButtonDisabled && styles.disabledButton,
@@ -25,7 +29,7 @@ export default function AccessibleButton({
       ]}
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel || title}
-      accessibilityHint={accessibilityHint}
+      accessibilityHint={accessibilityHint || 'Çift dokunarak etkinleştirin'}
       accessibilityState={{
         disabled: isButtonDisabled,
         busy: loading,
@@ -44,7 +48,8 @@ export default function AccessibleButton({
 const styles = StyleSheet.create({
   button: {
     backgroundColor: colors.primary,
-    height: 56, // Highly accessible height (recommended min is 48px)
+    minHeight: MIN_TOUCH_TARGET,
+    minWidth: MIN_TOUCH_TARGET,
     borderRadius: radius.button,
     justifyContent: 'center',
     alignItems: 'center',

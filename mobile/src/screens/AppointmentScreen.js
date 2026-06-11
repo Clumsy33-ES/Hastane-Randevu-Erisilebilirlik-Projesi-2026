@@ -16,7 +16,19 @@ import { MaterialIcons } from '@expo/vector-icons';
 import apiClient from '../api/api';
 import { getTheme, radius } from '../styles/theme';
 import { voiceService } from '../utils/speech';
+import { isPresentationMode, MIN_TOUCH_TARGET } from '../utils/buildConfig';
 import AccessibleButton from '../components/AccessibleButton';
+
+const PRESENTATION_STEP_PROMPTS = {
+  1: 'Şehir seçiniz',
+  2: 'İlçe seçiniz',
+  3: 'Branş seçiniz',
+  4: 'Hastane seçiniz',
+  5: 'Doktor seçiniz',
+  6: 'Tarih seçiniz',
+  7: 'Saat seçiniz',
+  8: 'Randevu özetini kontrol edin ve onaylamak için butona dokunun',
+};
 
 class AppointmentScreenErrorBoundary extends Component {
   constructor(props) {
@@ -47,7 +59,7 @@ class AppointmentScreenErrorBoundary extends Component {
   }
 }
 
-function AppointmentScreenContent({ setScreen, accessibilitySettings }) {
+function AppointmentScreenContent({ setScreen, accessibilitySettings, registerVoiceCallback }) {
   const theme = getTheme(accessibilitySettings);
   const { colors, fontSizes } = theme;
 
@@ -161,15 +173,25 @@ function AppointmentScreenContent({ setScreen, accessibilitySettings }) {
     }
   };
 
-  // Load cities on mount
+  // Load cities on mount and register global voice callback
   useEffect(() => {
     voiceService.setScreen('appointment');
     fetchCities();
 
     return () => {
-      voiceService.cleanup();
+      // Unregister screen handler on unmount
+      if (registerVoiceCallback) registerVoiceCallback(null);
     };
   }, []);
+
+  // Dev ortamında sesli komut; APK sunum modunda yalnızca buton + TTS
+  useEffect(() => {
+    if (registerVoiceCallback && !isPresentationMode()) {
+      registerVoiceCallback((text) => handleVoiceInput(text));
+    } else if (registerVoiceCallback) {
+      registerVoiceCallback(null);
+    }
+  }, [step, loading, cities, districts, branches, hospitals, doctors, slots, pageOffset]);
 
   const advanceStep = (nextStep) => {
     setHistoryStack(prev => [...prev, step]);
@@ -700,6 +722,17 @@ function AppointmentScreenContent({ setScreen, accessibilitySettings }) {
   };
 
   const triggerStepAnnouncement = async () => {
+    // APK sunum modu: kısa TTS yönlendirme, STT yok
+    if (isPresentationMode()) {
+      const prompt = PRESENTATION_STEP_PROMPTS[step];
+      if (!prompt || loading) return;
+      const ctx = `pres_step_${step}`;
+      if (lastSpokenContext.current === ctx) return;
+      lastSpokenContext.current = ctx;
+      await voiceService.speak(prompt, null, true);
+      return;
+    }
+
     voiceService.stopListening();
     const opts = getFormattedOptions();
     
@@ -734,29 +767,36 @@ function AppointmentScreenContent({ setScreen, accessibilitySettings }) {
   const findMatchingOption = (transcript, optionsList, offset = 0) => {
     const normalized = normalizeText(transcript);
     const tokens = normalized.split(/\s+/);
-    const chunk = optionsList.slice(offset, offset + 5);
 
     // 1. Strict Slot Time Match (Step 7)
     if (step === 7) {
       const cleanTranscript = normalized.replace(/\s+/g, "").replace(/:/g, "");
-      const exactTimeMatch = chunk.find(opt => {
+      // Search full slot list
+      const exactTimeMatch = optionsList.find(opt => {
         if (!opt.value) return false;
-        const timeStr = opt.value.time; // e.g. "15:00"
-        const hours = timeStr.split(':')[0]; // "15"
-        const cleanTime = timeStr.replace(":", ""); // "1500"
-        
-        // Exact "1500" or matching hours
-        return cleanTranscript === cleanTime || cleanTranscript.includes(cleanTime) || 
+        const timeStr = opt.value.time;
+        const hours = timeStr.split(':')[0];
+        const cleanTime = timeStr.replace(":", "");
+        return cleanTranscript === cleanTime || cleanTranscript.includes(cleanTime) ||
                cleanTranscript === hours || cleanTranscript === `saat${hours}`;
       });
       if (exactTimeMatch) return exactTimeMatch;
     }
 
-    // 2. Strict Exact Label Match
-    const exactMatch = chunk.find(opt => normalizeText(opt.label) === normalized);
-    if (exactMatch) return exactMatch;
+    // 2. Full-list exact label match (handles all 81 cities etc.)
+    const fullExactMatch = optionsList.find(opt => normalizeText(opt.label) === normalized);
+    if (fullExactMatch) return fullExactMatch;
 
-    // 3. Fallback to Number Matching
+    // 3. Full-list partial match (e.g. "elazığ" in "Elazığ")
+    const fullPartialMatch = optionsList.find(opt => {
+      const normLabel = normalizeText(opt.label);
+      if (!normalized || !normLabel) return false;
+      return normalized.includes(normLabel) || normLabel.includes(normalized);
+    });
+    if (fullPartialMatch) return fullPartialMatch;
+
+    // 4. Number/ordinal matching on currently visible page chunk
+    const chunk = optionsList.slice(offset, offset + 5);
     const TurkishNumberMap = {
       "bir": 1, "birinci": 1, "1": 1, "1.": 1, "numara bir": 1,
       "iki": 2, "ikinci": 2, "2": 2, "2.": 2, "numara iki": 2,
@@ -767,7 +807,6 @@ function AppointmentScreenContent({ setScreen, accessibilitySettings }) {
 
     let matchedNum = -1;
     for (const key of Object.keys(TurkishNumberMap)) {
-      // Must match whole word to prevent "15" triggering "1"
       if (normalized === key || tokens.includes(key)) {
         matchedNum = TurkishNumberMap[key];
         break;
@@ -781,7 +820,7 @@ function AppointmentScreenContent({ setScreen, accessibilitySettings }) {
       }
     }
 
-    // 4. Fallback for "en yakın tarih"
+    // 5. Fallback for "en yakın tarih"
     if (step === 6) {
       if (normalized.includes("en yakin") || normalized.includes("yakin") || normalized.includes("ilk")) {
         if (optionsList.length > 0) {
@@ -789,14 +828,6 @@ function AppointmentScreenContent({ setScreen, accessibilitySettings }) {
         }
       }
     }
-
-    // 5. Partial match in currently visible chunk
-    const chunkPartialMatch = chunk.find(opt => {
-      const normLabel = normalizeText(opt.label);
-      if (!normalized || !normLabel) return false;
-      return normalized.includes(normLabel) || normLabel.includes(normalized);
-    });
-    if (chunkPartialMatch) return chunkPartialMatch;
 
     return null;
   };
@@ -979,27 +1010,14 @@ function AppointmentScreenContent({ setScreen, accessibilitySettings }) {
   };
 
   const startListeningForCurrentStep = () => {
-    const currentStepName = getStepName(step);
-    console.log('[AppointmentScreen] Starting listening for step:', currentStepName);
-    voiceService.startListening(
-      (text) => handleVoiceInput(text),
-      () => {},
-      (err) => console.log('[AppointmentScreen Voice Error]', err),
-      () => console.log('[AppointmentScreen Voice Started]')
-    );
+    // Global STT is managed by App.js — no need to start here.
+    // The registerVoiceCallback effect keeps handleVoiceInput wired to the global dispatcher.
+    console.log('[AppointmentScreen] Step ready for input:', getStepName(step));
   };
 
   useEffect(() => {
-    if (loading) {
-      voiceService.stopListening();
-      return;
-    }
-
+    if (loading) return;
     triggerStepAnnouncement();
-
-    return () => {
-      voiceService.stopListening();
-    };
   }, [step, loading, pageOffset, cities.length, districts.length, branches.length, hospitals.length, doctors.length, slots.length]);
 
   const renderStepContent = () => {
@@ -1015,7 +1033,10 @@ function AppointmentScreenContent({ setScreen, accessibilitySettings }) {
       case 1:
         return (
           <View>
-            <Text style={[styles.stepTitle, { color: colors.text, fontSize: fontSizes.large }]}>
+            <Text
+              style={[styles.stepTitle, { color: colors.text, fontSize: fontSizes.large }]}
+              accessibilityRole="header"
+            >
               Şehir Seçin
             </Text>
             <FlatList
@@ -1034,6 +1055,7 @@ function AppointmentScreenContent({ setScreen, accessibilitySettings }) {
                   onPress={() => handleCitySelect(item)}
                   accessibilityRole="button"
                   accessibilityLabel={item.name}
+                  accessibilityHint="Bu şehri seçmek için çift dokunun"
                 >
                   <Text style={[styles.itemText, { color: colors.text, fontSize: fontSizes.medium }]}>
                     {item.name}
@@ -1436,6 +1458,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     padding: 18,
+    minHeight: MIN_TOUCH_TARGET,
     borderRadius: 12,
     borderWidth: 1.5,
     marginBottom: 12,
@@ -1457,6 +1480,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     padding: 16,
+    minHeight: MIN_TOUCH_TARGET,
     borderRadius: 12,
     borderWidth: 1.5,
     marginBottom: 12,

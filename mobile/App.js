@@ -11,10 +11,12 @@ import ProfileScreen from './src/screens/ProfileScreen';
 import AppointmentScreen from './src/screens/AppointmentScreen';
 import FamilyPhysicianScreen from './src/screens/FamilyPhysicianScreen';
 import VoiceCommandAssistantScreen from './src/screens/VoiceCommandAssistantScreen';
+import VoiceDebugScreen from './src/screens/VoiceDebugScreen';
 import { colors } from './src/styles/theme';
 import { Platform } from 'react-native';
 import { voiceService } from './src/utils/speech';
-import { detectRecognitionMode, requestMicrophonePermission, checkMicrophonePermission } from './src/utils/voiceRecognition';
+import { requestMicrophonePermission } from './src/utils/voiceRecognition';
+import { isPresentationMode, isSttAllowedOnScreen } from './src/utils/buildConfig';
 import { MaterialIcons } from '@expo/vector-icons';
 
 export default function App() {
@@ -26,14 +28,53 @@ export default function App() {
     voiceGuide: false,
   });
 
+  // Refs for global STT dispatcher (avoid stale closures)
+  const screenRef = React.useRef(screen);
+  const screenVoiceCallbackRef = React.useRef(null); // Registered by active screen
+  const lastCommandTextRef = React.useRef('');
+  const lastCommandTimeRef = React.useRef(0);
+
+  // Keep screenRef in sync
+  useEffect(() => {
+    screenRef.current = screen;
+  }, [screen]);
+
+  // Allow screens to register their own voice handler
+  const registerVoiceCallback = React.useCallback((fn) => {
+    screenVoiceCallbackRef.current = fn;
+  }, []);
+
+  // Central voice input dispatcher
+  const handleGlobalVoiceInput = React.useCallback((text) => {
+    if (!text || !text.trim()) return;
+
+    // 1.5s cooldown for same command
+    const now = Date.now();
+    const normText = text.toLowerCase().trim().replace(/[.,!?]/g, '');
+    if (normText === lastCommandTextRef.current && (now - lastCommandTimeRef.current) < 1500) {
+      console.log('[App] Cooldown: ignoring duplicate command:', normText);
+      return;
+    }
+    lastCommandTextRef.current = normText;
+    lastCommandTimeRef.current = now;
+
+    console.log('[App] Global voice input:', text, '| Screen:', screenRef.current);
+
+    // Route via global command handler (randevu al, ana sayfa, vb.)
+    const handled = voiceService.handleGlobalCommand(text, setScreen);
+    if (handled) return;
+
+    // Delegate to the currently active screen's handler
+    if (typeof screenVoiceCallbackRef.current === 'function') {
+      screenVoiceCallbackRef.current(text);
+    }
+  }, []);
+
   // Load configuration settings from AsyncStorage on startup
   useEffect(() => {
     const initializeApp = async () => {
       try {
-        // Auth token check
         const token = await AsyncStorage.getItem('token');
-        
-        // Load settings values
         const largeTextVal = await AsyncStorage.getItem('largeText');
         const highContrastVal = await AsyncStorage.getItem('highContrast');
         const voiceGuideVal = await AsyncStorage.getItem('voiceGuide');
@@ -62,22 +103,44 @@ export default function App() {
     voiceService.onVoiceEnabledChange = (enabled) => {
       setIsVoiceEnabled(enabled);
     };
-    
-    // Check permissions on native platforms without prompting every time
-    if (Platform.OS !== 'web' && screen !== 'login' && screen !== 'register' && screen !== 'forgotPassword' && screen !== null) {
-      checkMicrophonePermission().then((hasPermission) => {
-        console.log('[App] Current Microphone permission:', hasPermission);
-        if (!hasPermission && isVoiceEnabled) {
-          console.log('[App] Microphone denied but voice is enabled. Disabling voice.');
-          voiceService.setVoiceEnabled(false);
-        }
-      });
+    return () => {
+      voiceService.onVoiceEnabledChange = null;
+    };
+  }, []);
+
+  // Global STT:
+  // - Dev: tüm oturum açık ekranlarda
+  // - Production APK (sunum): yalnızca Sesli Asistan + Debug ekranlarında
+  const AUTH_SCREENS = ['login', 'register', 'forgotPassword'];
+  useEffect(() => {
+    if (screen === null) return;
+    const isAuthScreen = AUTH_SCREENS.includes(screen);
+    const sttAllowed = isSttAllowedOnScreen(screen);
+
+    if (!isAuthScreen && isVoiceEnabled && sttAllowed) {
+      console.log('[App] Starting global STT listener | screen:', screen);
+      voiceService.startListening(
+        (text) => handleGlobalVoiceInput(text),
+        () => {},
+        (err) => console.log('[App] Global STT error:', err),
+        () => console.log('[App] Global STT started'),
+        { screenName: screen }
+      );
+    } else {
+      console.log('[App] Stopping global STT | auth:', isAuthScreen, '| allowed:', sttAllowed);
+      voiceService.stopListening();
     }
 
+    return () => {};
+  }, [isVoiceEnabled, screen]);
+
+  // App teardown cleanup only (logout/exit)
+  useEffect(() => {
     return () => {
       voiceService.cleanup();
     };
-  }, [screen]);
+  }, []);
+
 
   // Update and save accessibility settings
   const setAccessibilitySettings = async (newSettings) => {
@@ -124,12 +187,14 @@ export default function App() {
         <HomeScreen
           setScreen={setScreen}
           accessibilitySettings={accessibilitySettings}
+          registerVoiceCallback={registerVoiceCallback}
         />
       )}
       {screen === 'myAppointments' && (
         <MyAppointmentsScreen
           setScreen={setScreen}
           accessibilitySettings={accessibilitySettings}
+          registerVoiceCallback={registerVoiceCallback}
         />
       )}
       {screen === 'profile' && (
@@ -137,28 +202,39 @@ export default function App() {
           setScreen={setScreen}
           accessibilitySettings={accessibilitySettings}
           setAccessibilitySettings={setAccessibilitySettings}
+          registerVoiceCallback={registerVoiceCallback}
         />
       )}
       {screen === 'appointment' && (
         <AppointmentScreen
           setScreen={setScreen}
           accessibilitySettings={accessibilitySettings}
+          registerVoiceCallback={registerVoiceCallback}
         />
       )}
       {screen === 'familyPhysician' && (
         <FamilyPhysicianScreen
           setScreen={setScreen}
           accessibilitySettings={accessibilitySettings}
+          registerVoiceCallback={registerVoiceCallback}
         />
       )}
       {screen === 'voiceCommandAssistant' && (
         <VoiceCommandAssistantScreen
           setScreen={setScreen}
           accessibilitySettings={accessibilitySettings}
+          registerVoiceCallback={registerVoiceCallback}
+        />
+      )}
+      {screen === 'voiceDebug' && (
+        <VoiceDebugScreen
+          setScreen={setScreen}
+          accessibilitySettings={accessibilitySettings}
+          registerVoiceCallback={registerVoiceCallback}
         />
       )}
 
-      {!isVoiceEnabled && screen !== 'login' && screen !== 'register' && screen !== 'forgotPassword' && screen !== null && (
+      {!isPresentationMode() && !isVoiceEnabled && screen !== 'login' && screen !== 'register' && screen !== 'forgotPassword' && screen !== null && (
         <View style={styles.floatingButtonContainer} pointerEvents="box-none">
           <TouchableOpacity
             style={styles.floatingButton}

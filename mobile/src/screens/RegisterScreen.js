@@ -31,7 +31,7 @@ export default function RegisterScreen({ setScreen, accessibilitySettings }) {
       voiceService.speak('Kayıt ekranındasınız. Hesap oluşturmak için formu doldurun.');
     }
     return () => {
-      voiceService.cleanup();
+      voiceService.stopListening();
     };
   }, []);
 

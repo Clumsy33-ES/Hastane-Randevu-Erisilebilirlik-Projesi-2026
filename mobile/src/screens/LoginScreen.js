@@ -30,7 +30,7 @@ export default function LoginScreen({ setScreen, accessibilitySettings }) {
       voiceService.speak('Giriş ekranındasınız. TC kimlik numaranızı girmek için ilk alana, şifrenizi girmek için ikinci alana dokunabilirsiniz. TalkBack veya VoiceOver kullanıyorsanız alanlar sesli okunacaktır.');
     }
     return () => {
-      voiceService.cleanup();
+      voiceService.stopListening();
     };
   }, []);
 

@@ -17,9 +17,8 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { voiceService } from '../utils/speech';
 import apiClient from '../api/api';
 import { getTheme, radius } from '../styles/theme';
-import {
-  detectRecognitionMode,
-} from '../utils/voiceRecognition';
+import { detectRecognitionMode } from '../utils/voiceRecognition';
+import { isPresentationMode } from '../utils/buildConfig';
 import AccessibleButton from '../components/AccessibleButton';
 
 export default function VoiceCommandAssistantScreen({ setScreen, accessibilitySettings }) {
@@ -115,16 +114,21 @@ export default function VoiceCommandAssistantScreen({ setScreen, accessibilitySe
 
   // Setup platform recognition mode on mount
   useEffect(() => {
-    // Set screen name
     voiceService.setScreen('voiceAssistant');
 
-    // detectRecognitionMode() returns 'web' | 'native' | 'simulation'
     const mode = detectRecognitionMode();
     setRecognitionMode(mode);
 
+    // APK sunum: deneysel STT yalnızca bu ekranda
+    if (isPresentationMode()) {
+      voiceService.enableSttForExperimentalScreen(true);
+    }
+
     return () => {
-      // Cleanup voice recognition and speech on unmount
-      voiceService.cleanup();
+      voiceService.stopListening();
+      if (isPresentationMode()) {
+        voiceService.enableSttForExperimentalScreen(false);
+      }
     };
   }, []);
 
@@ -309,7 +313,7 @@ export default function VoiceCommandAssistantScreen({ setScreen, accessibilitySe
       setStepHistory((prev) => prev.slice(0, -1));
       setCurrentStep(prevStep);
     } else {
-      voiceService.cleanup();
+      voiceService.stopListening();
       setScreen('home');
     }
   };
@@ -410,7 +414,7 @@ export default function VoiceCommandAssistantScreen({ setScreen, accessibilitySe
       return;
     }
     if (norm.includes('ana sayfa') || norm.includes('iptal')) {
-      voiceService.cleanup();
+      voiceService.stopListening();
       setScreen('home');
       return;
     }
@@ -453,10 +457,10 @@ export default function VoiceCommandAssistantScreen({ setScreen, accessibilitySe
             setLoading(false);
           }
         } else if (norm.includes('randevularim') || norm.includes('randevularımı gor')) {
-          voiceService.cleanup();
+          voiceService.stopListening();
           setScreen('myAppointments');
         } else if (norm.includes('profil') || norm.includes('ayarlar')) {
-          voiceService.cleanup();
+          voiceService.stopListening();
           setScreen('profile');
         } else {
           speakAndListen('Sizi anlayamadım. Lütfen randevu al, aile hekimi veya randevularım seçeneklerinden birini söyleyin.');
@@ -667,10 +671,10 @@ export default function VoiceCommandAssistantScreen({ setScreen, accessibilitySe
       case 'success':
       case 'error':
         if (norm.includes('ana sayfa') || norm.includes('tamam')) {
-          voiceService.cleanup();
+          voiceService.stopListening();
           setScreen('home');
         } else if (norm.includes('randevularim')) {
-          voiceService.cleanup();
+          voiceService.stopListening();
           setScreen('myAppointments');
         } else {
           handleGoBack();
@@ -944,7 +948,7 @@ export default function VoiceCommandAssistantScreen({ setScreen, accessibilitySe
               : isSpeaking
               ? 'Asistan konuşuyor...'
               : recognitionMode === 'simulation'
-              ? 'Expo Go (Sesli rehber otomatik çalışır)'
+              ? 'Ses tanıma kapalı (butonları kullanın)'
               : 'Asistan hazır'}
           </Text>
         </View>
@@ -993,8 +997,8 @@ export default function VoiceCommandAssistantScreen({ setScreen, accessibilitySe
             {recognitionMode === 'web'
               ? '🟢 Gerçek ses tanıma aktif — HTML5 Web Speech API kullanılıyor. Mikrofon izni tarayıcıdan isteniyor.'
               : recognitionMode === 'native'
-              ? '🟢 Gerçek ses tanıma aktif — Cihaz mikrofonu kullanılıyor. Tr-TR dili seçili.'
-              : 'ℹ️ Expo Go ortamı — bu ortamda cihaz mikrofonu ile gerçek ses tanıma desteklenmemektedir. Sesli rehber yönlendirmelerini takip ederek aşağıdaki büyük seçenek kartlarına dokunabilirsiniz.'}
+              ? '🟢 Gerçek ses tanıma aktif — Android SpeechRecognizer (expo-speech-recognition). Tr-TR dili seçili.'
+              : 'ℹ️ Ses tanıma kullanılamıyor (Expo Go veya native modül yüklenemedi). Profil > Ses Tanıma Debug ekranından durumu kontrol edin. Aşağıdaki seçenek kartlarına dokunarak devam edebilirsiniz.'}
           </Text>
         </View>
       </View>

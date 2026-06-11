@@ -13,11 +13,13 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { MaterialIcons } from '@expo/vector-icons';
 import { getTheme, radius } from '../styles/theme';
 import { voiceService } from '../utils/speech';
+import { isPresentationMode } from '../utils/buildConfig';
 
 export default function ProfileScreen({
   setScreen,
   accessibilitySettings,
   setAccessibilitySettings,
+  registerVoiceCallback,
 }) {
   const [user, setUser] = useState(null);
   const theme = getTheme(accessibilitySettings);
@@ -41,22 +43,14 @@ export default function ProfileScreen({
       voiceService.speak('Profil ve ayarlar ekranındasınız.');
     }
 
-    const startListener = () => {
-      voiceService.startListening(
-        (text) => {
-          console.log('[Profile Voice]', text);
-          voiceService.handleGlobalCommand(text, setScreen, handleLogout);
-        },
-        () => {},
-        (err) => console.log('[Profile Voice Error]', err),
-        () => console.log('[Profile Voice Started]')
-      );
-    };
-
-    startListener();
+    if (registerVoiceCallback && !isPresentationMode()) {
+      registerVoiceCallback((text) => {
+        console.log('[Profile Voice]', text);
+      });
+    }
 
     return () => {
-      voiceService.stopListening();
+      if (registerVoiceCallback) registerVoiceCallback(null);
     };
   }, []);
 
@@ -265,6 +259,28 @@ export default function ProfileScreen({
             />
           </View>
         </View>
+
+        {/* Voice Debug — APK ses tanıma sorun giderme */}
+        <TouchableOpacity
+          style={[styles.card, { backgroundColor: colors.card, borderRadius: radius.card, marginTop: 16 }]}
+          onPress={() => setScreen('voiceDebug')}
+          accessibilityRole="button"
+          accessibilityLabel="Ses tanıma debug ekranı"
+          accessibilityHint="Mikrofon izni, platform ve ses tanıma durumunu gösterir"
+        >
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+            <MaterialIcons name="bug-report" size={28} color={colors.primary} />
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.cardTitle, { color: colors.text, fontSize: fontSizes.large, marginBottom: 4 }]}>
+                Ses Tanıma Debug
+              </Text>
+              <Text style={[styles.cardSubtitle, { color: colors.muted, fontSize: fontSizes.small }]}>
+                Platform, mikrofon izni ve ses tanıma durumunu kontrol edin
+              </Text>
+            </View>
+            <MaterialIcons name="chevron-right" size={26} color={colors.muted} />
+          </View>
+        </TouchableOpacity>
 
         {/* TalkBack Guide Card */}
         <View style={[styles.footerInfo, { backgroundColor: colors.card }]}>

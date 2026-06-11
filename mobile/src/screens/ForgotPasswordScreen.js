@@ -14,6 +14,7 @@ import apiClient from '../api/api';
 import { getTheme, radius } from '../styles/theme';
 import AccessibleButton from '../components/AccessibleButton';
 import { voiceService } from '../utils/speech';
+import { isPresentationMode } from '../utils/buildConfig';
 
 export default function ForgotPasswordScreen({ setScreen, accessibilitySettings }) {
   const [step, setStep] = useState('tc'); // 'tc', 'code', 'newPassword'
@@ -86,7 +87,9 @@ export default function ForgotPasswordScreen({ setScreen, accessibilitySettings 
       }
     }
 
-    startStepListener();
+    if (!isPresentationMode()) {
+      startStepListener();
+    }
 
     return () => {
       voiceService.stopListening();

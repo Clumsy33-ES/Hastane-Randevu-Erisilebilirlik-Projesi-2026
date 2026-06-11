@@ -34,10 +34,11 @@
     },
     "plugins": [
       [
-        "@react-native-voice/voice",
+        "expo-speech-recognition",
         {
           "microphonePermission": "Randevu alma sesli komutları için mikrofona erişim izni gereklidir.",
-          "speechRecognitionPermission": "Söylediklerinizi algılayabilmek için ses tanıma izni gereklidir."
+          "speechRecognitionPermission": "Söylediklerinizi algılayabilmek için ses tanıma izni gereklidir.",
+          "androidSpeechServicePackages": ["com.google.android.googlequicksearchbox", "com.google.android.tts"]
         }
       ],
       "./plugins/withAndroidSupportExclude.js",

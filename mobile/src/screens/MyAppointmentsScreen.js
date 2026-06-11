@@ -14,8 +14,9 @@ import { MaterialIcons } from '@expo/vector-icons';
 import apiClient from '../api/api';
 import { getTheme, radius, colors as defaultColors } from '../styles/theme';
 import { voiceService } from '../utils/speech';
+import { isPresentationMode, MIN_TOUCH_TARGET } from '../utils/buildConfig';
 
-export default function MyAppointmentsScreen({ setScreen, accessibilitySettings }) {
+export default function MyAppointmentsScreen({ setScreen, accessibilitySettings, registerVoiceCallback }) {
   const [tab, setTab] = useState('active'); // 'active' | 'past'
   const [appointments, setAppointments] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -47,30 +48,17 @@ export default function MyAppointmentsScreen({ setScreen, accessibilitySettings 
 
   useEffect(() => {
     voiceService.setScreen('myAppointments');
-    if (accessibilitySettings?.voiceGuide) {
-      voiceService.speak('Randevularım ekranındasınız. Randevularınızı okutmak için "randevularımı oku" diyebilirsiniz.');
+    if (accessibilitySettings?.voiceGuide || isPresentationMode()) {
+      const msg = isPresentationMode()
+        ? 'Randevularım ekranındasınız. Aktif ve geçmiş randevularınızı sekmelerden görüntüleyebilirsiniz.'
+        : 'Randevularım ekranındasınız. Randevularınızı okutmak için "randevularımı oku" diyebilirsiniz.';
+      voiceService.speak(msg, null, isPresentationMode());
     }
     
     return () => {
-      voiceService.stopListening();
+      if (registerVoiceCallback) registerVoiceCallback(null);
     };
   }, []);
-
-  // Voice listener core
-  useEffect(() => {
-    const startListener = () => {
-      voiceService.startListening(
-        (text) => handleVoiceInput(text),
-        () => {},
-        (err) => console.log('[Appointments STT Error]', err),
-        () => console.log('[Appointments STT Started]')
-      );
-    };
-
-    if (!loading) {
-      startListener();
-    }
-  }, [loading, tab, appointments, voiceStep, selectedCancelItem]);
 
   const normalizeText = (text) => {
     if (!text) return '';
@@ -79,6 +67,14 @@ export default function MyAppointmentsScreen({ setScreen, accessibilitySettings 
       .replace(/ş/g, 's').replace(/ö/g, 'o').replace(/ç/g, 'c')
       .replace(/[^a-z0-9\s]/g, '');
   };
+
+  useEffect(() => {
+    if (registerVoiceCallback && !isPresentationMode() && !loading) {
+      registerVoiceCallback((text) => handleVoiceInput(text));
+    } else if (registerVoiceCallback) {
+      registerVoiceCallback(null);
+    }
+  }, [loading, tab, appointments, voiceStep, selectedCancelItem]);
 
   const handleVoiceInput = async (transcript) => {
     if (!transcript || transcript.trim() === '') {
@@ -495,6 +491,7 @@ const styles = StyleSheet.create({
   tabButton: {
     flex: 1,
     paddingVertical: 12,
+    minHeight: MIN_TOUCH_TARGET,
     justifyContent: 'center',
     alignItems: 'center',
     borderRadius: radius.input - 2,

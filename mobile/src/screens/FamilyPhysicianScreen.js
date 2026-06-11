@@ -15,23 +15,23 @@ import { MaterialIcons } from '@expo/vector-icons';
 import apiClient from '../api/api';
 import { getTheme, radius } from '../styles/theme';
 import { voiceService } from '../utils/speech';
+import { isPresentationMode } from '../utils/buildConfig';
 import AccessibleButton from '../components/AccessibleButton';
 
-export default function FamilyPhysicianScreen({ setScreen, accessibilitySettings }) {
+export default function FamilyPhysicianScreen({ setScreen, accessibilitySettings, registerVoiceCallback }) {
   const theme = getTheme(accessibilitySettings);
   const { colors, fontSizes } = theme;
 
   const [loading, setLoading] = useState(false);
   const isLoadingRef = useRef(false);
-  const [physicianInfo, setPhysicianInfo] = useState(null); // { has_family_physician, id, doctor_name, clinic_name, city, district }
+  const [physicianInfo, setPhysicianInfo] = useState(null);
   const [slots, setSlots] = useState([]);
   const [selectedDate, setSelectedDate] = useState(null);
-  const [bookingStep, setBookingStep] = useState(1); // 1: Date, 2: Slot, 3: Confirm
+  const [bookingStep, setBookingStep] = useState(1);
   const [selectedSlot, setSelectedSlot] = useState(null);
   const [isBooking, setIsBooking] = useState(false);
 
-  // Assignment states (used when has_family_physician is false)
-  const [assignStep, setAssignStep] = useState(1); // 1: City, 2: District, 3: Doctor Selection, 4: Confirm Assign
+  const [assignStep, setAssignStep] = useState(1);
   const [selectedPhysicianToAssign, setSelectedPhysicianToAssign] = useState(null);
   const [selectedCity, setSelectedCity] = useState(null);
   const [selectedDistrict, setSelectedDistrict] = useState(null);
@@ -40,52 +40,39 @@ export default function FamilyPhysicianScreen({ setScreen, accessibilitySettings
   const [physicians, setPhysicians] = useState([]);
 
   useEffect(() => {
-    let isMounted = true;
     voiceService.setScreen('familyPhysician');
-    
-    // Yalnızca ilk montajda "Aile hekimi ekranındasınız" demesi için ufak bir kontrol eklenebilir,
-    // ancak şu anki durumda adım değiştikçe re-mount gibi düşünerek sadece ilk açılışı varsayıyoruz.
 
-    const startListener = () => {
-      voiceService.startListening(
-        (text) => {
-          const norm = text.toLowerCase().trim();
-          console.log('[FamilyPhysician Voice]', norm);
-          
-          if (voiceService.handleGlobalCommand(norm, setScreen)) return;
+    const handleVoice = (text) => {
+      const norm = text.toLowerCase().trim();
+      console.log('[FamilyPhysician Voice]', norm);
 
-          // Eğer atama onayı adımındaysak
-          if (assignStep === 4 && selectedPhysicianToAssign) {
-            if (norm.includes('evet') || norm.includes('onayla') || norm.includes('ata')) {
-              performAssign();
-            } else if (norm.includes('hayır') || norm.includes('iptal') || norm.includes('vazgeç')) {
-              setAssignStep(3);
-              voiceService.speak('Atama işlemi iptal edildi. Farklı bir hekim seçebilirsiniz.');
-            }
-          }
-          // Eğer randevu onayı adımındaysak
-          else if (bookingStep === 3 && selectedSlot) {
-            if (norm.includes('evet') || norm.includes('onayla') || norm.includes('al')) {
-              performBooking();
-            } else if (norm.includes('hayır') || norm.includes('iptal') || norm.includes('vazgeç')) {
-              setBookingStep(2);
-              voiceService.speak('Randevu alma işlemi iptal edildi. Farklı bir saat seçebilirsiniz.');
-            }
-          }
-        },
-        () => {},
-        (err) => console.log('[FamilyPhysician Voice Error]', err),
-        () => console.log('[FamilyPhysician Voice Started]')
-      );
+      // Global routing handled by App.js — here handle screen-specific logic
+      if (assignStep === 4 && selectedPhysicianToAssign) {
+        if (norm.includes('evet') || norm.includes('onayla') || norm.includes('ata')) {
+          performAssign();
+        } else if (norm.includes('hayır') || norm.includes('iptal') || norm.includes('vazgeç')) {
+          setAssignStep(3);
+          voiceService.speak('Atama işlemi iptal edildi. Farklı bir hekim seçebilirsiniz.');
+        }
+      } else if (bookingStep === 3 && selectedSlot) {
+        if (norm.includes('evet') || norm.includes('onayla') || norm.includes('al')) {
+          performBooking();
+        } else if (norm.includes('hayır') || norm.includes('iptal') || norm.includes('vazgeç')) {
+          setBookingStep(2);
+          voiceService.speak('Randevu alma işlemi iptal edildi. Farklı bir saat seçebilirsiniz.');
+        }
+      }
     };
 
-    startListener();
+    if (registerVoiceCallback && !isPresentationMode()) {
+      registerVoiceCallback(handleVoice);
+    }
 
     return () => {
-      isMounted = false;
-      voiceService.stopListening();
+      if (registerVoiceCallback) registerVoiceCallback(null);
     };
   }, [bookingStep, assignStep, selectedSlot, selectedPhysicianToAssign]);
+
 
   // Sadece sayfa ilk açıldığında data yüklemek için:
   useEffect(() => {

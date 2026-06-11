@@ -1,5 +1,10 @@
 import * as Speech from 'expo-speech';
-import { VoiceRecognitionService } from './voiceRecognition';
+import {
+  VoiceRecognitionService,
+  detectRecognitionMode,
+  requestMicrophonePermission,
+} from './voiceRecognition';
+import { isPresentationMode } from './buildConfig';
 import { AppState, Platform } from 'react-native';
 
 class VoiceService {
@@ -14,8 +19,18 @@ class VoiceService {
     this.restartTimer = null;
     this.appStateSubscription = null;
 
-    this.voiceEnabled = true; // Default to true. App can toggle this.
+    // Dev: STT varsayılan açık. Production APK: mikrofon otomatik başlamaz.
+    this.voiceEnabled = !isPresentationMode();
     this.onVoiceEnabledChange = null;
+
+    // Status listener pattern — used by VoiceDebugScreen and App.js
+    this._statusListeners = [];
+    this.diagnostics = {
+      lastDetectedText: '(yok)',
+      lastRawError: '(yok)',
+      lastEndEventTime: '(hiç)',
+      listeningStatus: 'Durduruldu',
+    };
 
     // Stop speech and listening if app goes to background
     if (Platform.OS !== 'web') {
@@ -27,6 +42,29 @@ class VoiceService {
       });
     }
   }
+
+  addStatusListener(callback) {
+    if (typeof callback === 'function' && !this._statusListeners.includes(callback)) {
+      this._statusListeners.push(callback);
+    }
+  }
+
+  removeStatusListener(callback) {
+    this._statusListeners = this._statusListeners.filter(fn => fn !== callback);
+  }
+
+  _notifyStatusListeners() {
+    const snap = { ...this.diagnostics };
+    this._statusListeners.forEach(fn => {
+      try { fn(snap); } catch (e) { /* ignore */ }
+    });
+  }
+
+  _updateDiagnostics(patch) {
+    this.diagnostics = { ...this.diagnostics, ...patch };
+    this._notifyStatusListeners();
+  }
+
 
   setVoiceEnabled(enabled) {
     this.voiceEnabled = enabled;
@@ -42,21 +80,36 @@ class VoiceService {
     }
   }
 
+  /** Sunum modunda Sesli Asistan / Debug ekranı için STT'yi sessizce aç/kapat */
+  enableSttForExperimentalScreen(enabled) {
+    this.voiceEnabled = enabled;
+    if (this.onVoiceEnabledChange) {
+      this.onVoiceEnabledChange(enabled);
+    }
+    if (!enabled) {
+      this.stopListening();
+    }
+  }
+
   handleGlobalCommand(transcript, navigateFn, logoutFn = null) {
     if (!transcript) return false;
-    const norm = transcript.toLowerCase().trim();
+    
+    // Normalize transcript: lower case, trim, remove basic punctuation
+    const norm = transcript
+      .toLowerCase()
+      .trim()
+      .replace(/[.,!?]/g, '');
 
     // Ses Aç / Kapat
     if (norm.includes('ses kapat') || norm.includes('sesli asistanı kapat') || norm.includes('mikrofonu kapat') || norm.includes('dinlemeyi durdur')) {
       this.setVoiceEnabled(false);
-      return true; // Command handled
+      return true;
     }
     if (norm.includes('ses aç') || norm.includes('sesli asistanı aç') || norm.includes('mikrofonu aç') || norm.includes('beni dinle')) {
       this.setVoiceEnabled(true);
       return true;
     }
 
-    // Only process other commands if voice is enabled
     if (!this.voiceEnabled) {
       return false;
     }
@@ -68,20 +121,47 @@ class VoiceService {
       }
     }
 
-    if (norm.includes('ana sayfa')) {
-      if (navigateFn) {
-        this.cleanup();
+    // Global Routing Commands
+    if (navigateFn) {
+      if (norm.includes('randevu al') || norm.includes('hastane randevusu') || norm.includes('hastaneden randevu al')) {
+        this.stopListening();
+        this.speak('Hastane randevusu ekranı açılıyor.', null, true);
+        navigateFn('appointment');
+        return true;
+      }
+      if (norm.includes('randevularım') || norm.includes('randevular') || norm.includes('randevularimi gor')) {
+        this.stopListening();
+        this.speak('Randevularım ekranı açılıyor.', null, true);
+        navigateFn('myAppointments');
+        return true;
+      }
+      if (norm.includes('aile hekimi')) {
+        this.stopListening();
+        this.speak('Aile hekimi ekranı açılıyor.', null, true);
+        navigateFn('familyPhysician');
+        return true;
+      }
+      if (norm.includes('profil') || norm.includes('ayarlar')) {
+        this.stopListening();
+        this.speak('Profil ve ayarlar ekranı açılıyor.', null, true);
+        navigateFn('profile');
+        return true;
+      }
+      if (norm.includes('ana sayfa') || norm === 'geri' || norm === 'geri git') {
+        this.stopListening();
+        this.speak('Ana sayfaya dönülüyor.', null, true);
         navigateFn('home');
         return true;
       }
     }
 
-    if (norm.includes('yardım')) {
-      this.speak("Erişimli randevu sistemindesiniz. Sesli asistanı kapatmak için ses kapat, geri gitmek için geri, ana sayfaya dönmek için ana sayfa diyebilirsiniz.", null, true);
-      return true;
+    // "yardım", "tekrar et", "seçenekleri söyle" will be ignored here (return false)
+    // so the individual screens can handle them and read their specific help text.
+    if (norm.includes('yardım') || norm.includes('tekrar et') || norm.includes('seçenekleri söyle')) {
+      return false; 
     }
 
-    return false; // Not a global command, let the screen handle it
+    return false; // Not a global command
   }
 
   setScreen(screenName) {
@@ -198,54 +278,87 @@ class VoiceService {
     }
   }
 
-  startListening(onResult, onEnd, onError, onStart) {
+  startListening(onResult, onEnd, onError, onStart, { screenName } = {}) {
     if (!this.voiceEnabled) {
       console.log("[voiceService] Listening blocked, voiceEnabled is false.");
+      return;
+    }
+
+    if (isPresentationMode() && screenName && !['voiceCommandAssistant', 'voiceDebug'].includes(screenName)) {
+      console.log("[voiceService] STT blocked in presentation mode for screen:", screenName);
       return;
     }
 
     this.shouldBeListening = true;
     this.activeListener = { onResult, onEnd, onError, onStart };
 
-    const startActual = () => {
+    const startActual = async () => {
       if (!this.shouldBeListening || !this.voiceEnabled) return;
+
+      // Native APK: request mic permission before starting STT
+      if (Platform.OS !== 'web' && detectRecognitionMode() === 'native') {
+        const granted = await requestMicrophonePermission();
+        if (!granted) {
+          console.log('[voiceService] Microphone permission denied — cannot start listening.');
+          if (onError) onError('Mikrofon izni reddedildi');
+          this._updateDiagnostics({ listeningStatus: 'İzin reddedildi', lastRawError: 'Mikrofon izni reddedildi' });
+          return;
+        }
+      }
 
       // Stop any active session
       this.stopListeningInternal();
 
+      this._updateDiagnostics({ listeningStatus: 'Başlatılıyor...' });
+
       this.recognitionService = new VoiceRecognitionService(
         (text) => {
+          console.log('[voiceService] STT result:', text);
+          this._updateDiagnostics({
+            lastDetectedText: text || '(boş)',
+            listeningStatus: 'Sonuç alındı',
+          });
           if (onResult) onResult(text);
         },
         () => {
           this.isListening = false;
+          this._updateDiagnostics({
+            listeningStatus: 'Dinleme bitti',
+            lastEndEventTime: new Date().toLocaleTimeString(),
+          });
           if (onEnd) onEnd();
 
           // Auto-restart if we should still be listening and not speaking
           if (this.shouldBeListening && !this.isSpeaking) {
             if (this.restartTimer) clearTimeout(this.restartTimer);
             this.restartTimer = setTimeout(() => {
+              this._updateDiagnostics({ listeningStatus: 'Yeniden başlatılıyor...' });
               startActual();
-            }, 400); // Small delay before restarting
+            }, 400);
           }
         },
         (err) => {
           this.isListening = false;
+          const errMsg = typeof err === 'string' ? err : JSON.stringify(err);
+          this._updateDiagnostics({ listeningStatus: `Hata: ${errMsg}`, lastRawError: errMsg });
           if (onError) onError(err);
         },
         () => {
           this.isListening = true;
+          this._updateDiagnostics({ listeningStatus: 'Dinleniyor...' });
           if (onStart) onStart();
         }
       );
 
       this.recognitionService.start().catch((err) => {
         console.log('[voiceService startListening Error]', err);
+        this._updateDiagnostics({ listeningStatus: `Başlatma hatası: ${err}`, lastRawError: String(err) });
       });
     };
 
     startActual();
   }
+
 
   stopListeningInternal() {
     if (this.restartTimer) {
